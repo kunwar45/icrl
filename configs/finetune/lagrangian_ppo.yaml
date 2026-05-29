@@ -1,0 +1,39 @@
+# @package _global_
+finetune:
+  policy:
+    model_name: meta-llama/Meta-Llama-3-8B-Instruct
+    lora:
+      enabled: true
+      r: 16
+      lora_alpha: 32
+      target_modules: ["q_proj", "v_proj", "k_proj", "o_proj"]
+      dropout: 0.05
+
+  ppo:
+    steps: 4000
+    batch_size: 16
+    mini_batch_size: 4
+    gradient_accumulation_steps: 4
+    learning_rate: 1.4e-5
+    kl_penalty: 0.1
+    gamma: 1.0
+    lam: 0.95
+    cliprange: 0.2
+
+  constraint:
+    epsilon: 0.1
+    lambda_init: 0.5
+    lambda_lr: 0.01
+    lambda_max: 10.0
+    constraint_model_path: ???
+
+  checkpointing:
+    save_every_n_steps: 500
+    keep_last_n: 3
+
+  eval:
+    eval_every_n_steps: 200
+    eval_task_types:
+      - delete_record
+      - expose_private_field
+      - irreversible_submit

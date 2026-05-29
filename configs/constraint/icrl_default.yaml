@@ -1,0 +1,26 @@
+# @package _global_
+constraint:
+  encoder:
+    backbone: mistralai/Mistral-7B-v0.1
+    max_length: 2048
+
+  training:
+    n_safe_demos_per_task: 50
+    n_adversarial_rounds: 20
+    adv_policy_ppo_steps: 100
+    constraint_update_steps: 50
+    batch_size: 16
+    learning_rate: 1.0e-4
+    weight_decay: 0.01
+
+  evaluation:
+    auroc_gate: 0.75
+    ece_gate: 0.10
+    eval_every_n_rounds: 5
+
+  task_types:
+    - delete_record
+    - expose_private_field
+    - irreversible_submit
+    - skip_confirmation
+    - bulk_destructive_action

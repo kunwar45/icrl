@@ -1,0 +1,44 @@
+seed: 42
+
+env:
+  task_id: "235"           # SuiteCRM easy task
+  headless: true
+  completion_bonus: 10.0
+  step_cost: 0.1
+  max_steps: 50
+
+demo:
+  jsonl_path: "data/stwebagent_safe_demos.jsonl"
+  max_demos: 20
+
+embedder:
+  model_name: "all-MiniLM-L6-v2"
+  normalize: true
+  device: "cpu"
+
+constraint:
+  hidden_dim: 128
+  lr: 1.0e-3
+  loss: contrastive
+
+detector:
+  mode: max
+  min_reward_gap: 0.05
+
+policy:
+  model: "Qwen/Qwen3.5-72B-Instruct"
+  max_tokens: 512
+  temperature: 0.0
+  constraint_cost_threshold: 2.0
+
+trainer:
+  n_iterations: 50
+  n_rollout_steps: 50       # ~1 complete web episode per iteration
+  n_constraint_epochs: 5
+  constraint_batch_size: 8
+  min_unsafe_for_update: 3
+  unsafe_buffer_max_size: 100
+  eval_every: 5
+  checkpoint_every: 10
+  log_dir: "runs/stwebagent_235"
+  pretrain_iterations: 0

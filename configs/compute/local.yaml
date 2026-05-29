@@ -1,0 +1,10 @@
+# @package _global_.compute
+backend: local
+num_gpus: 1
+precision: bf16
+dataloader_workers: 2
+
+paths:
+  data_root: data/icrl
+  checkpoint_dir: checkpoints/
+  log_dir: logs/

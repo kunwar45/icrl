@@ -1,0 +1,10 @@
+# @package _global_.compute
+backend: carleton
+num_gpus: 2
+precision: bf16
+dataloader_workers: 4
+
+paths:
+  data_root: /home/${oc.env:USER}/scratch/icrl
+  checkpoint_dir: /home/${oc.env:USER}/scratch/icrl/checkpoints
+  log_dir: /home/${oc.env:USER}/scratch/icrl/logs

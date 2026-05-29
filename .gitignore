@@ -1,0 +1,73 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+local/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Testing & linting
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+.claude/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ML / experiment artifacts
+wandb/
+outputs/
+checkpoints/
+runs/
+*.pt
+*.pth
+*.ckpt
+
+# Data (keep structure, ignore large/generated files)
+data/**/*.jsonl
+data/**/*.parquet
+data/**/*.pkl
+data/**/*.pickle
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

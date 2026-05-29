@@ -1,0 +1,7 @@
+# @package _global_
+probe:
+  model_path: ???
+  n_train_trajectories: 200
+  n_test_trajectories: 50
+  ridge_alpha: 1.0
+  max_length: 2048

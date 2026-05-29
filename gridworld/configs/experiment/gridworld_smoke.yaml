@@ -1,0 +1,49 @@
+seed: 42
+
+env:
+  grid_size: 4
+  completion_reward: 20.0
+  step_cost: 1.0
+  max_steps: 20
+
+demo:
+  n_demos: 20
+  seed: 0
+  grid_size: 4
+
+embedder:
+  embed_dim: 16
+  vocab_size: 64
+
+constraint:
+  hidden_dim: 32
+  lr: 1.0e-3
+  loss: contrastive
+
+detector:
+  mode: max
+  min_reward_gap: 0.01
+
+policy:
+  lr: 3.0e-4
+  n_epochs: 4
+  batch_size: 32
+  lagrange_init: 0.1
+  lagrange_lr: 0.05
+  cost_limit: 0.5
+  hidden_dim: 32
+
+trainer:
+  n_iterations: 150
+  n_rollout_steps: 512
+  n_constraint_epochs: 3
+  constraint_batch_size: 8
+  min_unsafe_for_update: 2
+  unsafe_buffer_max_size: 200
+  eval_every: 10
+  checkpoint_every: 999
+  log_dir: "runs/gridworld_smoke"
+  # PPO pretrain: let it learn to reach the goal before constraint activates.
+  # With no constraint, PPO will find the col-0 shortcut (reward=17).
+  # Then ICRL kicks in and the constraint should push it back to col-1 (reward=15).
+  pretrain_iterations: 40

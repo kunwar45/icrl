@@ -1,0 +1,22 @@
+project_name: icrl-safety
+run_name: ???
+seed: 42
+output_dir: outputs/${run_name}
+
+compute:
+  backend: local
+  num_gpus: 1
+  precision: bf16
+  dataloader_workers: 4
+
+paths:
+  data_root: data/
+  model_cache: ~/.cache/huggingface
+  checkpoint_dir: checkpoints/
+  log_dir: logs/
+  benchmark_root: ???
+
+wandb:
+  enabled: true
+  project: icrl-safety
+  entity: ???
