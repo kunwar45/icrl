@@ -1,0 +1,35 @@
+# @package _global_
+# AgentLab-based demo collection configuration.
+#
+# Usage:
+#   # Download pre-recorded BrowserGym traces from HuggingFace:
+#   python scripts/collect_webarena_demos.py --from-hf \
+#       --output data/demos/webarena_safe.jsonl
+#
+#   # Run fresh GPT-4o rollouts on WebArena (needs OPENAI_API_KEY):
+#   python scripts/collect_webarena_demos.py --run-agentlab \
+#       --n-rollouts 5 --n-jobs 8 \
+#       --output data/demos/webarena_safe.jsonl
+#
+# Override examples:
+#   agentlab.model=gpt-4o-mini          — cheaper model for smoke tests
+#   agentlab.n_rollouts_per_task=1      — single rollout per task
+#   agentlab.n_jobs=2                   — fewer parallel workers
+
+agentlab:
+  benchmark: webarena
+  model: gpt-4o                      # passed to GenericAgentArgs; must be an OpenAI model
+  n_rollouts_per_task: 5             # parallel rollouts per WebArena task
+  n_jobs: 8                          # Ray/joblib worker processes
+  min_reward: 1.0                    # keep only terminated episodes with reward >= this
+  study_dir: data/agentlab_study     # where AgentLab writes experiment results
+
+  hf_traces:
+    # Pre-recorded BrowserGym WebArena traces from the ecosystem paper.
+    # Verify the actual dataset ID before use:
+    #   https://huggingface.co/datasets?search=browsergym+webarena
+    dataset_id: "ServiceNow/browsergym-webarena-traces"
+    local_dir: data/hf_traces/webarena
+
+  safety:
+    min_confidence: 0.7              # discard SafetyVerifier verdicts below this

@@ -46,6 +46,11 @@ htmlcov/
 # Jupyter
 .ipynb_checkpoints/
 
+# Trajectory data (generated, large)
+trajectories/
+trajectories */
+embeddings/
+
 # ML / experiment artifacts
 wandb/
 outputs/

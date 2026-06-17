@@ -19,13 +19,16 @@ class Trajectory:
     source: str
     reward: Optional[float] = None
     constraint_score: Optional[float] = None
+    terminated: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> "Trajectory":
+        d = dict(d)
         d["steps"] = [Step(**s) for s in d["steps"]]
+        d.setdefault("terminated", False)
         return cls(**d)
 
     def to_text(self) -> str:

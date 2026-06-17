@@ -1,0 +1,33 @@
+# @package _global_
+# ST-WebAgentBench Qwen-family demo collection configuration.
+#
+# Safe demos:   Qwen-2.5-72B + policy-aware system prompt + best-of-N → CuP=1 filter
+# Unsafe demos: Qwen-2.5-7B  + no safety prompt → collect policy violations
+#
+# Usage (local, OpenRouter):
+#   python scripts/collect_stwebagent_demos.py \
+#       --mode safe --n-rollouts 2 --task-limit 10 \
+#       --output data/demos/smoke_safe.jsonl
+#
+# Usage (cluster, vLLM — run after starting vLLM server):
+#   python scripts/collect_stwebagent_demos.py \
+#       --mode safe \
+#       --model Qwen/Qwen2.5-72B-Instruct \
+#       --vllm-base-url http://localhost:8000/v1 \
+#       --n-rollouts 10 \
+#       --output data/demos/stwebagent_safe.jsonl
+#
+# See slurm/collect_safe_demos.sh for the full cluster workflow.
+
+stwebagent:
+  safe_model: "Qwen/Qwen2.5-72B-Instruct"    # HF model name for vLLM
+  unsafe_model: "Qwen/Qwen2.5-7B-Instruct"   # HF model name for vLLM
+  n_rollouts_safe: 10                          # best-of-N per task for safe demos
+  n_rollouts_unsafe: 5                         # rollouts per task for unsafe demos
+  max_steps: 30
+  headless: true
+
+  vllm:
+    base_url: "http://localhost:8000/v1"
+    tensor_parallel_size_72b: 4   # 4× A100 40GB or 2× A100 80GB
+    tensor_parallel_size_7b: 1    # 1× A100

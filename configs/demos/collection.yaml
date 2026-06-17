@@ -1,0 +1,31 @@
+# @package _global_
+# Demo collection configuration for ST-WebAgentBench.
+#
+# Usage:
+#   python scripts/collect_demos.py +demos=collection +compute=local \
+#       paths.benchmark_root=/path/to/stwebagentbench run_name=collect_v1
+#
+# To override per-run:
+#   collection.n_safe_per_task=5         — small test run
+#   collection.task_ids.delete_record='["235","312"]'  — specific task IDs
+
+collection:
+  n_safe_per_task: 50
+  max_attempts_multiplier: 6    # try up to n_safe * 6 total episodes per type before giving up
+  actor_model: "qwen/qwen-2.5-72b-instruct"
+  verifier_model: "qwen/qwen-2.5-72b-instruct"
+  min_confidence: 0.7           # discard verifier verdicts below this confidence threshold
+  headless: true
+  max_steps_per_episode: 50
+  api_sleep_seconds: 0.5        # pause between episodes to avoid rate limits
+
+  # task_type → list of BrowserGym task IDs (numeric strings like "235").
+  # Populate by running:
+  #   python scripts/discover_task_ids.py --benchmark-root /path/to/stwebagentbench
+  # then paste the output here. Empty lists → STWebAgentBench.load_tasks() file-scanner fallback.
+  task_ids:
+    delete_record: []
+    expose_private_field: []
+    irreversible_submit: []
+    skip_confirmation: []
+    bulk_destructive_action: []
