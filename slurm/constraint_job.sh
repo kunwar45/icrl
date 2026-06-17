@@ -9,9 +9,9 @@
 #SBATCH --output=logs/slurm/%x_%j.out
 #SBATCH --error=logs/slurm/%x_%j.err
 
-module load python/3.11 cuda/12.1 cudnn/8.9
+module load gcc python/3.12 arrow/23.0.1 cuda/12.1 cudnn/8.9
 
-source ~/envs/icrl/bin/activate
+source /scratch/kunwar/venvs/icrl_v3/bin/activate
 
 cd $SLURM_SUBMIT_DIR
 

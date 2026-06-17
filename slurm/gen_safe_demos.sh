@@ -109,8 +109,8 @@ export HF_HOME="${HF_CACHE}"
 export TRANSFORMERS_CACHE="${HF_CACHE}"
 
 # Load cluster modules if available (no-op outside SLURM)
-module load python/3.11 cuda/12.1 cudnn/8.9 2>/dev/null || true
-source ~/envs/icrl/bin/activate 2>/dev/null || true
+module load gcc python/3.12 arrow/23.0.1 cuda/12.1 cudnn/8.9 2>/dev/null || true
+source /scratch/kunwar/venvs/icrl_v3/bin/activate 2>/dev/null || true
 
 echo "========================================================================"
 echo " icrl-gen  job ${SLURM_JOB_ID:-local}  node $(hostname)"

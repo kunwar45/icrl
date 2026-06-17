@@ -10,8 +10,8 @@
 #SBATCH --output=logs/slurm/%x_%A_%a.out
 #SBATCH --error=logs/slurm/%x_%A_%a.err
 
-module load python/3.11 cuda/12.1 cudnn/8.9
-source ~/envs/icrl/bin/activate
+module load gcc python/3.12 arrow/23.0.1 cuda/12.1 cudnn/8.9
+source /scratch/kunwar/venvs/icrl_v3/bin/activate
 cd $SLURM_SUBMIT_DIR
 
 EPSILONS=(0.05 0.1 0.2)
