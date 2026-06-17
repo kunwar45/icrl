@@ -1,7 +1,7 @@
 # Local compose for SuiteCRM — uses Docker Hub images (fallback from ECR rate limits)
 services:
   mariadb:
-    image: public.ecr.aws/bitnami/mariadb:11.4
+    image: bitnami/mariadb:latest
     platform: linux/amd64
     environment:
       - ALLOW_EMPTY_PASSWORD=yes

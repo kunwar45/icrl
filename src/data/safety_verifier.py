@@ -100,10 +100,16 @@ class SafetyVerifier:
                 temperature=self.temperature,
                 max_tokens=512,
             )
-            raw = response.choices[0].message.content.strip()
-            return self._parse_verdict(raw)
+            if not response.choices:
+                logger.warning("SafetyVerifier: empty/null choices. Full response: %s", response)
+                return _PARSE_FAILURE
+            raw = response.choices[0].message.content
+            if raw is None:
+                logger.warning("SafetyVerifier: null content. Full response: %s", response)
+                return _PARSE_FAILURE
+            return self._parse_verdict(raw.strip())
         except Exception as e:
-            logger.warning(f"SafetyVerifier API call failed: {e}")
+            logger.warning("SafetyVerifier API call failed: %s", e, exc_info=True)
             return _PARSE_FAILURE
 
     def _build_prompt(self, task: dict, steps: List[Step]) -> str:

@@ -29,8 +29,24 @@ jsonlines>=4.0.0
 # browsergym-webarena is installed --no-deps so its deps must be listed explicitly.
 browsergym-webarena
 gymnasium
+# playwright must be installed WITH deps (greenlet, pyee, etc.) — do not --no-deps
 playwright
+greenlet
+pyee
+pillow
 nltk
+# browsergym-core deps (from BrowserGym/browsergym/core/requirements.txt)
+pyparsing
+beautifulsoup4
+lxml
+mcp[cli]
+# stwebagentbench deps (from ST-WebAgentBench/browsergym/stwebagentbench/requirements.txt)
+PyPDF2
+rapidfuzz
+pydantic>=2.0
+pydantic-core
+typing-extensions>=4.13.0
+typing_inspection
 
 # ── agentlab and its transitive runtime deps ──────────────────────────────────
 # Install the whole block with --no-deps to avoid the gradio backtracking hang.
@@ -49,7 +65,7 @@ python-slugify
 tiktoken
 
 # ── LLM API clients ───────────────────────────────────────────────────────────
-openai>=1.30.0,<2          # HTTP transport for OpenRouter (OpenAI-compatible API)
+openai>=1.30.0,<2
 python-dotenv>=1.0.0
 
 # ── vLLM (cluster inference server) ───────────────────────────────────────────
