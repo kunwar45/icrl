@@ -1,0 +1,33 @@
+# BrowserGym + ST-WebAgentBench runtime dependencies.
+#
+# The packages themselves are installed editable from your forks (not from PyPI):
+#   pip install -e $BROWSERGYM_ROOT/browsergym/core --no-deps
+#   pip install -e $STWEB_ROOT/browsergym/stwebagentbench --no-deps
+#   echo "$(realpath $STWEB_ROOT)" > site-packages/stwebagentbench.pth
+#
+# Also install ST-WebAgentBench/requirements.txt (kept in sync with this file).
+
+browsergym-webarena
+gymnasium
+playwright
+pyee
+pillow
+nltk
+pyparsing
+lxml
+beautifulsoup4
+soupsieve
+requests
+pydantic>=2.0
+pydantic-core
+typing_extensions>=4.13.0
+typing-inspection
+PyPDF2
+rapidfuzz
+beartype
+tqdm
+aiolimiter
+text-generation
+python-dateutil
+python-dotenv>=1.0.0
+openai>=1.30.0,<2

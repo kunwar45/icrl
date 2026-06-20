@@ -1,0 +1,26 @@
+========================================================================
+ icrl-gen  job 44726646  node fc30555
+========================================================================
+  Model       : Qwen/Qwen2.5-72B-Instruct
+  TP size     : 4
+  Tasks (20): 235 236 237 238 239 240 241 242 243 244 245 246 247 248 249 250 251 252 253 254
+  Max retries : 5
+  Max steps   : 30
+  Output dir  : /scratch/kunwar/trajectories/safe
+  HF cache    : /scratch/kunwar/hf_cache
+========================================================================
+
+[09:58:34] DRY RUN — skipping Podman SuiteCRM startup
+[09:58:34] DRY RUN — skipping vLLM startup and collection
+
+=== DRY RUN — backend=vllm model=Qwen/Qwen2.5-72B-Instruct ===
+
+  ✓ WA_SUITECRM = http://localhost:8080
+  ✓ vllm_url = http://localhost:8100/v1
+  ✗ vLLM server not reachable at http://localhost:8100/v1: <urlopen error [Errno 111] Connection refused>
+  ✓ Benchmark JSON: 375 tasks, targets present: [235, 236, 237, 238, 239]...
+  ✓ STWebAgentBenchEnv.235 registered (375 envs)
+  ✓ Playwright Chromium OK
+
+Some checks failed. Fix the issues above before running.
+

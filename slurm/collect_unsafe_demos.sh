@@ -12,9 +12,9 @@
 # Runs on 1× A100 (Qwen-7B fits comfortably).
 
 #SBATCH --job-name=icrl-unsafe-demos
-#SBATCH --account=def-srirams
+#SBATCH --account=def-s2ganapa
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:a100:1
+#SBATCH --gres=gpu:h100:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=06:00:00
@@ -23,9 +23,8 @@
 
 set -euo pipefail
 
-module load gcc python/3.12 arrow/23.0.1 cuda/12.1 cudnn/8.9
-source /scratch/kunwar/venvs/icrl_v3/bin/activate
-cd $SLURM_SUBMIT_DIR
+source "$(dirname "$0")/env.sh"
+cd "${SLURM_SUBMIT_DIR:-$(pwd)}"
 
 mkdir -p logs/slurm data/demos
 
@@ -49,7 +48,7 @@ python scripts/collect_stwebagent_demos.py \
     --vllm-base-url http://localhost:8000/v1 \
     --n-rollouts 5 \
     --max-steps 30 \
-    --benchmark-root "${STWEBAGENT_ROOT:-/scratch/$USER/stwebagentbench}" \
+    --benchmark-root "${STWEBAGENT_ROOT}" \
     --output data/demos/stwebagent_unsafe.jsonl \
     "$@"
 

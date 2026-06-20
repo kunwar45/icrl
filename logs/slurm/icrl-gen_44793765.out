@@ -1,0 +1,22 @@
+========================================================================
+ icrl-gen  job 44793765  node fc10401
+========================================================================
+  Model       : Qwen/Qwen2.5-72B-Instruct
+  TP size     : 4
+  Tasks (2): 235 236 
+  Max retries : 5
+  Max steps   : 30
+  Output dir  : /scratch/kunwar/trajectories/safe
+  HF cache    : /scratch/kunwar/hf_cache
+========================================================================
+
+[17:47:29] Starting MariaDB + SuiteCRM via Apptainer...
+[17:47:29] apptainer: /cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Core/apptainer/1.4.5/bin/apptainer (apptainer version 1.4.5)
+Usage:
+  apptainer [global options...] instance stop [stop options...] [instance]
+
+Run 'apptainer --help' for more detailed usage information.
+Usage:
+  apptainer [global options...] instance stop [stop options...] [instance]
+
+Run 'apptainer --help' for more detailed usage information.

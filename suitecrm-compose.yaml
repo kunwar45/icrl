@@ -1,7 +1,8 @@
-# Local compose for SuiteCRM — uses Docker Hub images (fallback from ECR rate limits)
+# Local compose for SuiteCRM.
+# public.ecr.aws/bitnami/* was removed 2026-06-10; use bitnamilegacy on Docker Hub.
 services:
   mariadb:
-    image: bitnami/mariadb:latest
+    image: bitnamilegacy/mariadb:11.4
     platform: linux/amd64
     environment:
       - ALLOW_EMPTY_PASSWORD=yes
@@ -17,7 +18,7 @@ services:
       retries: 10
 
   suitecrm:
-    image: public.ecr.aws/bitnami/suitecrm:8
+    image: bitnamilegacy/suitecrm:8
     platform: linux/amd64
     ports:
       - "8080:8080"

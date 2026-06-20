@@ -1,0 +1,13 @@
+========================================================================
+ icrl-gen  job 44726403  node fc10401
+========================================================================
+  Model       : Qwen/Qwen2.5-72B-Instruct
+  TP size     : 4
+  Tasks (20): 235 236 237 238 239 240 241 242 243 244 245 246 247 248 249 250 251 252 253 254
+  Max retries : 5
+  Max steps   : 30
+  Output dir  : /scratch/kunwar/trajectories/safe
+  HF cache    : /scratch/kunwar/hf_cache
+========================================================================
+
+[09:55:33] Starting MariaDB + SuiteCRM via Podman...

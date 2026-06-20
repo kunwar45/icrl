@@ -1,18 +1,18 @@
 #!/bin/bash
 #SBATCH --job-name=icrl-sweep
-#SBATCH --account=def-srirams
+#SBATCH --account=def-s2ganapa
 #SBATCH --array=0-8
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:a100:2
+#SBATCH --gres=gpu:h100:2
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
 #SBATCH --time=24:00:00
 #SBATCH --output=logs/slurm/%x_%A_%a.out
 #SBATCH --error=logs/slurm/%x_%A_%a.err
 
-module load gcc python/3.12 arrow/23.0.1 cuda/12.1 cudnn/8.9
-source /scratch/kunwar/venvs/icrl_v3/bin/activate
-cd $SLURM_SUBMIT_DIR
+set -euo pipefail
+source "$(dirname "$0")/env.sh"
+cd "${SLURM_SUBMIT_DIR:-$(pwd)}"
 
 EPSILONS=(0.05 0.1 0.2)
 SEEDS=(42 123 456)

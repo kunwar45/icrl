@@ -47,40 +47,34 @@
 #
 #   DRY_RUN        Set to 1 to run --dry-run only (no browser, no episodes).
 #
-#   WA_SUITECRM    SuiteCRM URL (default: http://localhost:8080).
-#                  If unset the job starts SuiteCRM via Apptainer on the
-#                  compute node itself.  Override to point at an external
-#                  instance (e.g. ngrok URL) if preferred.
-#
-#   SUITECRM_SIF   Path to the SuiteCRM Apptainer SIF image.
-#                  Default: /scratch/kunwar/apptainer/suitecrm.sif
-#                  Pull once with:
-##                    apptainer pull /scratch/kunwar/apptainer/suitecrm.sif \
-#                      docker://bitnami/suitecrm:latest
-#
-#   MARIADB_SIF    Path to the MariaDB Apptainer SIF image.
-#                  Default: /scratch/kunwar/apptainer/mariadb.sif
-#                  Pull once with:
-#                    apptainer pull /scratch/kunwar/apptainer/mariadb.sif \
-#                      docker://bitnami/mariadb:latest
+#   WA_SUITECRM    SuiteCRM URL reachable from the compute node.
+#                  If unset the job starts SuiteCRM via Apptainer on the compute
+#                  node itself.  Recommended on Alliance: start SuiteCRM once
+#                  on the login node (scripts/start_suitecrm_apptainer.sh) and set
+#                  WA_SUITECRM=http://<login-node>:8080/public in icrl/.env.
 #
 #   SUITECRM_DATA  Persistent data dir for SuiteCRM + MariaDB on /scratch.
-#                  Default: /scratch/kunwar/suitecrm
+#                  Default: /scratch/$USER/suitecrm
 #                  First run initialises the DB (~5-10 min). Subsequent runs
 #                  reuse the existing DB and boot in ~30 s.
+#
+#   MARIADB_SIF    Apptainer image for MariaDB (default: below).
+#   SUITECRM_SIF   Apptainer image for SuiteCRM (default: below).
+#                  Pull once with apptainer pull from docker://bitnamilegacy/*.
+#                  public.ecr.aws/bitnami/* was removed 2026-06-10.
 #
 # ── Resource sizing ──────────────────────────────────────────────────────────
 #
 #   Qwen-72B in bfloat16 ≈ 144 GB VRAM.
-#   4× A100-40GB  → set TP_SIZE=4, --gres=gpu:a100:4
+#   4× A100-40GB  → set TP_SIZE=4, --gres=gpu:h100:4
 #   2× A100-80GB  → set TP_SIZE=2, --gres=gpu:a100l:2   (L = 80 GB variant)
 #
 #SBATCH --job-name=icrl-gen
-#SBATCH --account=def-srirams
+#SBATCH --account=def-s2ganapa
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:a100:4
+#SBATCH --gres=gpu:h100:4
 #SBATCH --mem=128G
 #SBATCH --time=12:00:00
 #SBATCH --output=logs/slurm/%x_%j.out
@@ -106,9 +100,10 @@ HF_CACHE="${SCRATCH:-/tmp}/hf_cache"
 LOG_DIR="logs/slurm"
 DRY_RUN="${DRY_RUN:-0}"
 
-SUITECRM_DATA="${SUITECRM_DATA:-/scratch/kunwar/suitecrm}"
-MARIADB_SIF="${MARIADB_SIF:-/scratch/kunwar/apptainer/mariadb.sif}"
-SUITECRM_SIF="${SUITECRM_SIF:-/scratch/kunwar/apptainer/suitecrm.sif}"
+SUITECRM_DATA="${SUITECRM_DATA:-/scratch/${USER}/suitecrm}"
+MARIADB_SIF="${MARIADB_SIF:-/scratch/${USER}/apptainer/mariadb.sif}"
+SUITECRM_SIF="${SUITECRM_SIF:-/scratch/${USER}/apptainer/suitecrm.sif}"
+APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-/scratch/${USER}/apptainer/tmp}"
 
 # ── Resolve task list ─────────────────────────────────────────────────────────
 
@@ -132,8 +127,23 @@ export HF_HOME="${HF_CACHE}"
 export TRANSFORMERS_CACHE="${HF_CACHE}"
 
 # Load cluster modules if available (no-op outside SLURM)
-module load gcc python/3.12 arrow/23.0.1 cuda/12.1 cudnn/8.9 apptainer/1.4.5 podman/4.9.5 2>/dev/null || true
+module load gcc python/3.12 arrow/23.0.1 cuda/12.1 cudnn/8.9 apptainer/1.4.5 2>/dev/null || true
 source /scratch/kunwar/venvs/icrl_v4/bin/activate 2>/dev/null || true
+
+load_apptainer() {
+    if command -v apptainer &>/dev/null; then
+        echo "[$(date +%H:%M:%S)] apptainer: $(command -v apptainer) ($(apptainer --version 2>/dev/null || echo unknown))"
+        return 0
+    fi
+    for mod in apptainer/1.4.5 apptainer/1.3.5; do
+        if module load "$mod" 2>/dev/null && command -v apptainer &>/dev/null; then
+            echo "[$(date +%H:%M:%S)] Loaded ${mod} → $(command -v apptainer)"
+            return 0
+        fi
+    done
+    echo "ERROR: apptainer not found. Load manually: module load apptainer/1.4.5" >&2
+    exit 127
+}
 
 echo "========================================================================"
 echo " icrl-gen  job ${SLURM_JOB_ID:-local}  node $(hostname)"
@@ -148,55 +158,64 @@ echo "  HF cache    : ${HF_CACHE}"
 echo "========================================================================"
 echo ""
 
-# ── SuiteCRM via Podman (skipped if WA_SUITECRM already set externally) ───────
+# ── SuiteCRM via Apptainer (skipped if WA_SUITECRM already set externally) ────
 #
-# Podman pod shares a network namespace — SuiteCRM reaches MariaDB on 127.0.0.1.
-# Images are pulled from ECR on first run and cached in ~/.local/share/containers.
-# Persistent data lives in SUITECRM_DATA on /scratch so the DB survives across jobs.
-# First boot takes ~10 min (DB init); subsequent boots take ~30 s.
+# Uses apptainer instance run (not start) with --writable-tmpfs on read-only SIFs.
+# SuiteCRM reaches MariaDB on 127.0.0.1. SIF images from bitnamilegacy/* on Docker Hub.
+# Persistent data lives in SUITECRM_DATA on /scratch. First boot ~10 min.
 
 if [ -z "${WA_SUITECRM:-}" ]; then
-    echo "[$(date +%H:%M:%S)] Starting MariaDB + SuiteCRM via Podman..."
+    if [ "${DRY_RUN}" = "1" ]; then
+        export WA_SUITECRM="http://localhost:8080"
+        echo "[$(date +%H:%M:%S)] DRY RUN — skipping Apptainer SuiteCRM startup"
+    else
+    echo "[$(date +%H:%M:%S)] Starting MariaDB + SuiteCRM via Apptainer..."
+    load_apptainer
+    export APPTAINER_TMPDIR
+    mkdir -p "${APPTAINER_TMPDIR}" "${SUITECRM_DATA}/mariadb" "${SUITECRM_DATA}/app"
 
-    mkdir -p "${SUITECRM_DATA}/mariadb" "${SUITECRM_DATA}/app"
+    for sif in "${MARIADB_SIF}" "${SUITECRM_SIF}"; do
+        if [ ! -f "${sif}" ]; then
+            echo "ERROR: missing ${sif}. Pull with:" >&2
+            echo "  apptainer pull ${sif} docker://bitnamilegacy/..." >&2
+            exit 1
+        fi
+    done
 
-    POD_NAME="crm_${SLURM_JOB_ID:-local}"
+    CRM_MARIADB="mariadb_${SLURM_JOB_ID:-local}"
+    CRM_APP="suitecrm_${SLURM_JOB_ID:-local}"
 
-    # Pod exposes port 8080 on the host
-    podman pod create --name "${POD_NAME}" -p 8080:8080
+    apptainer instance stop "${CRM_APP}" 2>/dev/null || true
+    apptainer instance stop "${CRM_MARIADB}" 2>/dev/null || true
 
-    # MariaDB — listens on 127.0.0.1:3306 inside the pod
-    podman run -d \
-        --pod "${POD_NAME}" \
-        --name "mariadb_${SLURM_JOB_ID:-local}" \
-        -v "${SUITECRM_DATA}/mariadb:/bitnami/mariadb:z" \
-        -e ALLOW_EMPTY_PASSWORD=yes \
-        -e MARIADB_USER=bn_suitecrm \
-        -e MARIADB_DATABASE=bitnami_suitecrm \
-        -e MARIADB_PASSWORD=bitnami123 \
-        public.ecr.aws/bitnami/mariadb:11.4
+    apptainer instance run \
+        --writable-tmpfs \
+        --bind "${SUITECRM_DATA}/mariadb:/bitnami/mariadb" \
+        --env ALLOW_EMPTY_PASSWORD=yes \
+        --env MARIADB_USER=bn_suitecrm \
+        --env MARIADB_DATABASE=bitnami_suitecrm \
+        --env MARIADB_PASSWORD=bitnami123 \
+        "${MARIADB_SIF}" "${CRM_MARIADB}"
 
-    # Give MariaDB time to start before SuiteCRM connects
     echo "[$(date +%H:%M:%S)] Waiting 30 s for MariaDB to initialise..."
     sleep 30
 
-    # SuiteCRM — listens on 0.0.0.0:8080 inside the pod
-    podman run -d \
-        --pod "${POD_NAME}" \
-        --name "suitecrm_${SLURM_JOB_ID:-local}" \
-        -v "${SUITECRM_DATA}/app:/bitnami/suitecrm:z" \
-        -e SUITECRM_DATABASE_HOST=127.0.0.1 \
-        -e SUITECRM_DATABASE_PORT_NUMBER=3306 \
-        -e SUITECRM_DATABASE_USER=bn_suitecrm \
-        -e SUITECRM_DATABASE_NAME=bitnami_suitecrm \
-        -e SUITECRM_DATABASE_PASSWORD=bitnami123 \
-        -e ALLOW_EMPTY_PASSWORD=yes \
-        public.ecr.aws/bitnami/suitecrm:8
+    apptainer instance run \
+        --writable-tmpfs \
+        --bind "${SUITECRM_DATA}/app:/bitnami/suitecrm" \
+        --env SUITECRM_DATABASE_HOST=127.0.0.1 \
+        --env SUITECRM_DATABASE_PORT_NUMBER=3306 \
+        --env SUITECRM_DATABASE_USER=bn_suitecrm \
+        --env SUITECRM_DATABASE_NAME=bitnami_suitecrm \
+        --env SUITECRM_DATABASE_PASSWORD=bitnami123 \
+        --env ALLOW_EMPTY_PASSWORD=yes \
+        "${SUITECRM_SIF}" "${CRM_APP}"
 
     export WA_SUITECRM="http://localhost:8080"
 
-    trap 'echo "[$(date +%H:%M:%S)] Removing Podman pod ${POD_NAME}..."; \
-          podman pod rm -f "${POD_NAME}" 2>/dev/null || true' EXIT
+    trap 'echo "[$(date +%H:%M:%S)] Stopping Apptainer CRM instances..."; \
+          apptainer instance stop "'"${CRM_APP}"'" 2>/dev/null || true; \
+          apptainer instance stop "'"${CRM_MARIADB}"'" 2>/dev/null || true' EXIT
 
     echo "[$(date +%H:%M:%S)] Waiting for SuiteCRM at ${WA_SUITECRM} ..."
     MAX_WAIT_CRM=600
@@ -210,6 +229,7 @@ if [ -z "${WA_SUITECRM:-}" ]; then
         fi
     done
     echo "[$(date +%H:%M:%S)] SuiteCRM ready after ${WAITED_CRM}s"
+    fi
 else
     echo "[$(date +%H:%M:%S)] Using external SuiteCRM: ${WA_SUITECRM}"
 fi
@@ -242,9 +262,10 @@ python -m vllm.entrypoints.openai.api_server \
 VLLM_PID=$!
 echo "  vLLM PID: ${VLLM_PID} — log: ${LOG_DIR}/vllm_${SLURM_JOB_ID:-local}.log"
 
-# Kill vLLM on exit (pod cleanup trap already set above)
+# Kill vLLM on exit (CRM instance cleanup trap already set above)
 trap 'echo "[$(date +%H:%M:%S)] Caught signal — killing vLLM ${VLLM_PID}"; kill ${VLLM_PID} 2>/dev/null || true; \
-      podman pod rm -f "crm_${SLURM_JOB_ID:-local}" 2>/dev/null || true' EXIT
+      apptainer instance stop "suitecrm_${SLURM_JOB_ID:-local}" 2>/dev/null || true; \
+      apptainer instance stop "mariadb_${SLURM_JOB_ID:-local}" 2>/dev/null || true' EXIT
 
 # ── Wait for vLLM health ──────────────────────────────────────────────────────
 

@@ -5,6 +5,7 @@ precision: bf16
 dataloader_workers: 4
 
 paths:
-  data_root: /home/${oc.env:USER}/scratch/icrl
-  checkpoint_dir: /home/${oc.env:USER}/scratch/icrl/checkpoints
-  log_dir: /home/${oc.env:USER}/scratch/icrl/logs
+  data_root: /scratch/${oc.env:USER}/icrl
+  checkpoint_dir: /scratch/${oc.env:USER}/icrl/checkpoints
+  log_dir: /scratch/${oc.env:USER}/icrl/logs
+  benchmark_root: /scratch/${oc.env:USER}/ST-WebAgentBench

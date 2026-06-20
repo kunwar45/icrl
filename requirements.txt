@@ -1,3 +1,11 @@
+# Full icrl install (ML + browser benchmark + agentlab + vLLM).
+# Cluster one-shot: bash scripts/setup_cluster.sh
+#
+# On Compute Canada, if typing_extensions resolves to the system copy (4.12.x):
+#   pip install "typing_extensions>=4.13.0" --force-reinstall --no-deps
+
+-r requirements-browser.txt
+
 # ── Core ML stack ─────────────────────────────────────────────────────────────
 torch>=2.3.0
 transformers>=4.41.0
@@ -6,7 +14,14 @@ trl>=0.9.4
 accelerate>=0.30.0
 bitsandbytes>=0.43.1
 datasets>=2.19.0
-huggingface-hub>=0.23.0
+huggingface-hub>=0.34.0
+safetensors>=0.4.3
+tokenizers>=0.21.0
+
+# torch / transformers transitive (often missing with --no-deps cluster installs)
+sympy
+jinja2
+networkx
 
 # ── Scientific / data ─────────────────────────────────────────────────────────
 scikit-learn>=1.4.2
@@ -20,6 +35,7 @@ joblib
 # ── Config / logging ──────────────────────────────────────────────────────────
 omegaconf>=2.3.0
 hydra-core>=1.3.2
+antlr4-python3-runtime==4.9.*
 wandb>=0.17.0
 jsonlines>=4.0.0
 
@@ -49,9 +65,8 @@ typing-extensions>=4.13.0
 typing_inspection
 
 # ── agentlab and its transitive runtime deps ──────────────────────────────────
-# Install the whole block with --no-deps to avoid the gradio backtracking hang.
-# gradio must be pinned — agentlab's >=5.5 constraint causes multi-hour resolver
-# hangs if pip is allowed to resolve it freely.
+# Install agentlab with --no-deps if pip resolver hangs on gradio:
+#   pip install agentlab --no-deps && pip install -r requirements.txt
 agentlab>=0.1.0
 gradio==5.31.0
 ray[default]==2.49.1
@@ -73,3 +88,5 @@ vllm
 
 # ── Dev / testing ─────────────────────────────────────────────────────────────
 pytest>=8.2.0
+iniconfig
+pygments

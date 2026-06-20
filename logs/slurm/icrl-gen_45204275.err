@@ -1,0 +1,6 @@
+INFO:    Terminating fuse-overlayfs after timeout
+INFO:    Timeouts can be caused by a running background process
+ERROR:   container cleanup failed: no instance found with name mariadb_45204275
+FATAL:   container creation failed: while applying cgroups config: while creating cgroup manager: failed to connect to dbus (hint: for rootless containers, maybe you need to install dbus-user-session package, see https://github.com/opencontainers/runc/blob/master/docs/cgroup-v2.md): could not execute `busctl --user --no-pager status` (output: "Failed to connect to bus: No such file or directory\n"): exit status 1
+
+FATAL:   while executing starter: failed to start instance: while running /cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Core/apptainer/1.4.5/libexec/apptainer/bin/starter: exit status 255

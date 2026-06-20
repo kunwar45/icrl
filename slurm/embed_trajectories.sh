@@ -59,7 +59,7 @@
 #   100 trajectories × 2048 tokens ≈ 2-5 min with batch_size=16.
 #
 #SBATCH --job-name=icrl-embed
-#SBATCH --account=def-srirams
+#SBATCH --account=def-s2ganapa
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -96,8 +96,8 @@ mkdir -p "${LOG_DIR}" embeddings "${HF_CACHE}"
 export HF_HOME="${HF_CACHE}"
 export TRANSFORMERS_CACHE="${HF_CACHE}"
 
-module load gcc python/3.12 arrow/23.0.1 cuda/12.1 cudnn/8.9 2>/dev/null || true
-source /scratch/kunwar/venvs/icrl_v3/bin/activate 2>/dev/null || true
+source "$(dirname "$0")/env.sh" 2>/dev/null || true
+cd "${SLURM_SUBMIT_DIR:-$(pwd)}"
 
 FLASH_FLAG=""
 [ "${FLASH_ATTN}" = "1" ] && FLASH_FLAG="--flash-attn"
