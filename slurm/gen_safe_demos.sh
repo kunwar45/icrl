@@ -130,6 +130,20 @@ export TRANSFORMERS_CACHE="${HF_CACHE}"
 module load gcc python/3.12 arrow/23.0.1 cuda/12.1 cudnn/8.9 apptainer/1.4.5 2>/dev/null || true
 source /scratch/kunwar/venvs/icrl_v4/bin/activate 2>/dev/null || true
 
+# Load .env defaults without overriding vars already set in the environment
+# (vars passed via the submitting shell or sbatch --export take precedence)
+_DOTENV="${SLURM_SUBMIT_DIR:-.}/.env"
+if [ -f "${_DOTENV}" ]; then
+    while IFS= read -r _line || [ -n "${_line}" ]; do
+        [[ "${_line}" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${_line// }" ]] && continue
+        if [[ "${_line}" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*) ]]; then
+            [[ -z "${!BASH_REMATCH[1]+x}" ]] && export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+        fi
+    done < "${_DOTENV}"
+fi
+unset _DOTENV _line
+
 load_apptainer() {
     if command -v apptainer &>/dev/null; then
         echo "[$(date +%H:%M:%S)] apptainer: $(command -v apptainer) ($(apptainer --version 2>/dev/null || echo unknown))"
