@@ -1,0 +1,21 @@
+project_name: icrl-sycophancy
+run_name: ???
+seed: 42
+output_dir: outputs/${run_name}
+
+compute:
+  backend: local
+  num_gpus: 1
+  precision: bf16
+  dataloader_workers: 4
+
+paths:
+  data_root: sycophancy/data
+  model_cache: ~/.cache/huggingface
+  checkpoint_dir: sycophancy/checkpoints/
+  log_dir: sycophancy/logs/
+
+wandb:
+  enabled: true
+  project: icrl-sycophancy
+  entity: ???

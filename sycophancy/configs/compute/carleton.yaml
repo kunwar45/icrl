@@ -1,0 +1,11 @@
+# @package _global_.compute
+backend: carleton
+num_gpus: 2
+precision: bf16
+dataloader_workers: 4
+
+paths:
+  data_root: /scratch/${oc.env:USER}/icrl
+  checkpoint_dir: /scratch/${oc.env:USER}/icrl/checkpoints
+  log_dir: /scratch/${oc.env:USER}/icrl/logs
+  benchmark_root: /scratch/${oc.env:USER}/ST-WebAgentBench

@@ -1,0 +1,10 @@
+# @package _global_.compute
+backend: gcp
+num_gpus: 4
+precision: bf16
+dataloader_workers: 8
+
+paths:
+  data_root: /mnt/disks/data/icrl
+  checkpoint_dir: /mnt/disks/data/icrl/checkpoints
+  log_dir: /mnt/disks/data/icrl/logs
