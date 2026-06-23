@@ -70,7 +70,7 @@
 #   2× A100-80GB  → set TP_SIZE=2, --gres=gpu:a100l:2   (L = 80 GB variant)
 #
 #SBATCH --job-name=icrl-gen
-#SBATCH --account=def-s2ganapa
+#SBATCH --account=def-s2ganapa_gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
@@ -103,7 +103,9 @@ DRY_RUN="${DRY_RUN:-0}"
 SUITECRM_DATA="${SUITECRM_DATA:-/scratch/${USER}/suitecrm}"
 MARIADB_SIF="${MARIADB_SIF:-/scratch/${USER}/apptainer/mariadb.sif}"
 SUITECRM_SIF="${SUITECRM_SIF:-/scratch/${USER}/apptainer/suitecrm.sif}"
+SUITECRM_SANDBOX="${SUITECRM_SANDBOX:-/scratch/${USER}/apptainer/suitecrm_sandbox}"
 APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-/scratch/${USER}/apptainer/tmp}"
+SUITECRM_OVERLAY="${SUITECRM_OVERLAY:-/scratch/${USER}/apptainer/suitecrm_overlay.img}"
 
 # ── Resolve task list ─────────────────────────────────────────────────────────
 
@@ -127,8 +129,70 @@ export HF_HOME="${HF_CACHE}"
 export TRANSFORMERS_CACHE="${HF_CACHE}"
 
 # Load cluster modules if available (no-op outside SLURM)
-module load gcc python/3.12 arrow/23.0.1 cuda/12.1 cudnn/8.9 apptainer/1.4.5 2>/dev/null || true
+module load gcc python/3.12 arrow/23.0.1 cuda/12.9 cudnn apptainer/1.4.5 2>/dev/null || true
 source /scratch/kunwar/venvs/icrl_v4/bin/activate 2>/dev/null || true
+
+# ── Pre-flight: verify critical imports before wasting GPU time ───────────────
+echo "[$(date +%H:%M:%S)] Pre-flight import check..."
+python - <<'PREFLIGHT'
+import sys
+failures = []
+checks = [
+    # Core stack
+    ("vllm",                              "vllm"),
+    ("fastapi",                           "fastapi"),
+    ("torch",                             "torch"),
+    ("playwright",                        "playwright.sync_api"),
+    ("dotenv",                            "dotenv"),
+    ("browsergym",                        "browsergym"),
+    # vLLM API server deps (discovered via past startup crashes)
+    ("prometheus_fastapi_instrumentator", "prometheus_fastapi_instrumentator"),
+    ("prometheus_client",                 "prometheus_client"),
+    ("uvloop",                            "uvloop"),
+    ("opentelemetry",                     "opentelemetry.sdk"),
+    ("msgspec",                           "msgspec"),
+    ("partial_json_parser",               "partial_json_parser"),
+    ("xgrammar",                          "xgrammar"),
+    ("outlines",                          "outlines"),
+    ("interegular",                       "interegular"),
+    ("sentencepiece",                     "sentencepiece"),
+    ("lark",                              "lark"),
+    ("filelock",                          "filelock"),
+    ("compressed_tensors",                "compressed_tensors"),
+    ("numba",                             "numba"),
+]
+for label, mod in checks:
+    try:
+        __import__(mod)
+        print(f"  [ok] {label}")
+    except ImportError as e:
+        print(f"  [MISSING] {label}: {e}", file=sys.stderr)
+        failures.append(label)
+
+# Check torch sees CUDA
+try:
+    import torch
+    if not torch.cuda.is_available():
+        print("  [WARN] torch.cuda.is_available() = False (expected on login node, fatal on compute)", file=sys.stderr)
+    else:
+        n = torch.cuda.device_count()
+        print(f"  [ok] torch.cuda — {n} GPU(s) visible")
+except Exception as e:
+    print(f"  [WARN] torch.cuda check failed: {e}", file=sys.stderr)
+
+if failures:
+    print(f"\nPre-flight FAILED — missing: {', '.join(failures)}", file=sys.stderr)
+    print("Fix: cd icrl && source /scratch/$USER/venvs/icrl_v4/bin/activate && pip install <package>", file=sys.stderr)
+    sys.exit(1)
+print("Pre-flight passed.")
+PREFLIGHT
+
+PREFLIGHT_EXIT=$?
+if [ "${PREFLIGHT_EXIT}" -ne 0 ]; then
+    echo "ERROR: Pre-flight failed — aborting to avoid wasting GPU time."
+    exit "${PREFLIGHT_EXIT}"
+fi
+echo ""
 
 # Load .env defaults without overriding vars already set in the environment
 # (vars passed via the submitting shell or sbatch --export take precedence)
@@ -138,11 +202,16 @@ if [ -f "${_DOTENV}" ]; then
         [[ "${_line}" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${_line// }" ]] && continue
         if [[ "${_line}" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*) ]]; then
-            [[ -z "${!BASH_REMATCH[1]+x}" ]] && export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+            _var="${BASH_REMATCH[1]}"
+            _val="${BASH_REMATCH[2]}"
+            # Use a plain variable for indirect expansion — array-subscript
+            # indirect expansion (${!BASH_REMATCH[1]+x}) is unreliable across
+            # bash versions and silently skips the assignment.
+            [[ -z "${!_var:-}" ]] && export "$_var=$_val"
         fi
     done < "${_DOTENV}"
 fi
-unset _DOTENV _line
+unset _DOTENV _line _var _val
 
 load_apptainer() {
     if command -v apptainer &>/dev/null; then
@@ -174,9 +243,10 @@ echo ""
 
 # ── SuiteCRM via Apptainer (skipped if WA_SUITECRM already set externally) ────
 #
-# Uses apptainer instance run (not start) with --writable-tmpfs on read-only SIFs.
-# SuiteCRM reaches MariaDB on 127.0.0.1. SIF images from bitnamilegacy/* on Docker Hub.
-# Persistent data lives in SUITECRM_DATA on /scratch. First boot ~10 min.
+# Recommended: start SuiteCRM once on the login node with start_suitecrm_apptainer.sh
+# and set WA_SUITECRM in .env so this block is skipped entirely.
+# SuiteCRM uses a persistent ext3 overlay (not --writable-tmpfs) to avoid
+# "No space left on device" from the large Angular cache baked into the SIF.
 
 if [ -z "${WA_SUITECRM:-}" ]; then
     if [ "${DRY_RUN}" = "1" ]; then
@@ -188,13 +258,21 @@ if [ -z "${WA_SUITECRM:-}" ]; then
     export APPTAINER_TMPDIR
     mkdir -p "${APPTAINER_TMPDIR}" "${SUITECRM_DATA}/mariadb" "${SUITECRM_DATA}/app"
 
-    for sif in "${MARIADB_SIF}" "${SUITECRM_SIF}"; do
+    for sif in "${MARIADB_SIF}"; do
         if [ ! -f "${sif}" ]; then
             echo "ERROR: missing ${sif}. Pull with:" >&2
-            echo "  apptainer pull ${sif} docker://bitnamilegacy/..." >&2
+            echo "  apptainer pull ${sif} docker://bitnamilegacy/mariadb:11.4" >&2
             exit 1
         fi
     done
+    if [ ! -d "${SUITECRM_SANDBOX}" ]; then
+        if [ ! -f "${SUITECRM_SIF}" ]; then
+            echo "ERROR: missing ${SUITECRM_SIF} and sandbox ${SUITECRM_SANDBOX}." >&2
+            exit 1
+        fi
+        echo "[$(date +%H:%M:%S)] Building SuiteCRM sandbox (one-time, ~2 min)..."
+        apptainer build --sandbox "${SUITECRM_SANDBOX}" "${SUITECRM_SIF}"
+    fi
 
     CRM_MARIADB="mariadb_${SLURM_JOB_ID:-local}"
     CRM_APP="suitecrm_${SLURM_JOB_ID:-local}"
@@ -214,8 +292,10 @@ if [ -z "${WA_SUITECRM:-}" ]; then
     echo "[$(date +%H:%M:%S)] Waiting 30 s for MariaDB to initialise..."
     sleep 30
 
+    # Use --writable sandbox: AllowSetuidMountExtfs=false on this cluster means
+    # --overlay ext3 fails; --writable-tmpfs fills the 64 MB default tmpfs.
     apptainer instance run \
-        --writable-tmpfs \
+        --writable \
         --bind "${SUITECRM_DATA}/app:/bitnami/suitecrm" \
         --env SUITECRM_DATABASE_HOST=127.0.0.1 \
         --env SUITECRM_DATABASE_PORT_NUMBER=3306 \
@@ -223,7 +303,7 @@ if [ -z "${WA_SUITECRM:-}" ]; then
         --env SUITECRM_DATABASE_NAME=bitnami_suitecrm \
         --env SUITECRM_DATABASE_PASSWORD=bitnami123 \
         --env ALLOW_EMPTY_PASSWORD=yes \
-        "${SUITECRM_SIF}" "${CRM_APP}"
+        "${SUITECRM_SANDBOX}" "${CRM_APP}"
 
     export WA_SUITECRM="http://localhost:8080"
 
@@ -265,7 +345,7 @@ fi
 # ── Start vLLM server ─────────────────────────────────────────────────────────
 
 echo "[$(date +%H:%M:%S)] Starting vLLM (tensor-parallel=${TP_SIZE})..."
-python -m vllm.entrypoints.openai.api_server \
+VLLM_USE_FLASHINFER_SAMPLER=0 python -m vllm.entrypoints.openai.api_server \
     --model "${MODEL}" \
     --tensor-parallel-size "${TP_SIZE}" \
     --port "${VLLM_PORT}" \
@@ -284,7 +364,7 @@ trap 'echo "[$(date +%H:%M:%S)] Caught signal — killing vLLM ${VLLM_PID}"; kil
 # ── Wait for vLLM health ──────────────────────────────────────────────────────
 
 echo "[$(date +%H:%M:%S)] Waiting for vLLM /health ..."
-MAX_WAIT=300
+MAX_WAIT=900  # Qwen-72B needs ~170s to read from Lustre + shard loading time
 WAITED=0
 until curl -sf "${VLLM_URL%/v1}/health" > /dev/null 2>&1; do
     sleep 5

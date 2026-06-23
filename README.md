@@ -186,8 +186,10 @@ apptainer pull /scratch/$USER/apptainer/suitecrm.sif \
 
 ```bash
 module load apptainer/1.4.5
-bash scripts/start_suitecrm_apptainer.sh --wait
+bash scripts/start_suitecrm_apptainer.sh
 ```
+
+The script waits for SuiteCRM to respond (up to 10 min) before returning. First boot initialises the database and takes ~10 min; subsequent starts take ~1 min.
 
 **Manual commands:**
 
@@ -245,16 +247,16 @@ Default SuiteCRM credentials (Bitnami image): **user** / **bitnami**
 ### 3e. Manage instances
 
 ```bash
-bash scripts/start_suitecrm_apptainer.sh --status   # list instances
+bash scripts/start_suitecrm_apptainer.sh            # start + wait for HTTP (default)
+bash scripts/start_suitecrm_apptainer.sh --status   # list running instances
 bash scripts/start_suitecrm_apptainer.sh --stop     # stop both
-bash scripts/start_suitecrm_apptainer.sh --wait     # restart + wait for HTTP
 ```
 
 ### After a login-node reboot
 
 ```bash
 module load apptainer/1.4.5
-bash scripts/start_suitecrm_apptainer.sh --wait
+bash scripts/start_suitecrm_apptainer.sh
 ```
 
 Data persists in `/scratch/$USER/suitecrm/{mariadb,app}` — you do **not** need to re-pull SIF images or re-initialise the DB.
@@ -397,6 +399,7 @@ scancel JOBID
 ├── apptainer/
 │   ├── mariadb.sif             MariaDB image (~123 MB)
 │   ├── suitecrm.sif            SuiteCRM image (~306 MB)
+│   ├── suitecrm_overlay.img    Persistent ext3 overlay for SuiteCRM (2 GB, auto-created)
 │   └── tmp/                    Apptainer build temp
 ├── suitecrm/
 │   ├── mariadb/                MariaDB data (persistent)
@@ -417,7 +420,9 @@ scancel JOBID
 | `instance mariadb already exists` | `apptainer instance stop mariadb; apptainer instance stop suitecrm` |
 | MariaDB `Read-only file system` | Add `--writable-tmpfs` to `instance run` |
 | Only `appinit` running, no `mariadbd` | Use `instance run`, not `instance start` |
-| `curl localhost:8080` fails after start | Wait ~10 min on first boot; check `~/.apptainer/instances/logs/$HOSTNAME/$USER/suitecrm.out` |
+| `curl localhost:8080` fails right after start | SuiteCRM is still booting — the script now waits automatically; check `~/.apptainer/instances/logs/$HOSTNAME/$USER/suitecrm.out` if it times out |
+| `No space left on device` in suitecrm.err | The bitnami SIF has a large Angular cache baked in; the tiny tmpfs overlay fills up when the entrypoint tries to delete it. Fixed: `start_suitecrm_apptainer.sh` now uses a 2 GB persistent ext3 overlay (`/scratch/$USER/apptainer/suitecrm_overlay.img`) instead of `--writable-tmpfs`. If corrupted, recreate with `bash scripts/start_suitecrm_apptainer.sh --reset-overlay`. |
+| `Device or resource busy` on `.angular` | Caused by an old version of the script that bind-mounted `.angular` to scratch — the mountpoint couldn't be rmdir'd. Update to the current script which uses `--overlay`. |
 | Compute node can't reach CRM | Use login-node hostname in `WA_SUITECRM`, not `localhost`; confirm port 8080 reachable from compute nodes |
 | `apptainer pull` slow / fails on `/scratch` | Set `APPTAINER_TMPDIR=/scratch/$USER/apptainer/tmp` |
 
@@ -546,7 +551,7 @@ mkdir -p /scratch/$USER/apptainer/tmp
 export APPTAINER_TMPDIR=/scratch/$USER/apptainer/tmp
 apptainer pull /scratch/$USER/apptainer/mariadb.sif docker://bitnamilegacy/mariadb:11.4
 apptainer pull /scratch/$USER/apptainer/suitecrm.sif docker://bitnamilegacy/suitecrm:8
-bash scripts/start_suitecrm_apptainer.sh --wait
+bash scripts/start_suitecrm_apptainer.sh   # starts + waits until HTTP 200
 echo "WA_SUITECRM=http://$(hostname):8080/public" >> ~/icrl/.env
 
 # === EVERY SESSION ===

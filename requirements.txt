@@ -7,7 +7,7 @@
 -r requirements-browser.txt
 
 # ── Core ML stack ─────────────────────────────────────────────────────────────
-torch>=2.3.0
+torch==2.11.0
 transformers>=4.41.0
 peft>=0.11.1
 trl>=0.9.4
@@ -85,6 +85,41 @@ python-dotenv>=1.0.0
 
 # ── vLLM (cluster inference server) ───────────────────────────────────────────
 vllm
+uvloop
+fastapi
+uvicorn
+msgspec
+prometheus_client
+prometheus-fastapi-instrumentator
+partial-json-parser
+blake3
+einops
+compressed-tensors
+cbor2
+psutil
+pyzmq
+threadpoolctl
+openai-harmony
+model-hosting-container-standards
+cloudpickle
+diskcache==5.6.3
+lark==1.2.2
+llguidance
+xgrammar
+mistral_common
+depyf
+watchfiles
+python-json-logger
+ninja
+pybase64
+ijson
+setproctitle
+cachetools
+py-cpuinfo
+opentelemetry-sdk
+opentelemetry-api
+opentelemetry-exporter-otlp
+opentelemetry-semantic-conventions
 
 # ── Dev / testing ─────────────────────────────────────────────────────────────
 pytest>=8.2.0

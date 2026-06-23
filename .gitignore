@@ -46,6 +46,9 @@ htmlcov/
 # Jupyter
 .ipynb_checkpoints/
 
+# SLURM logs
+logs/slurm/
+
 # Trajectory data (generated, large)
 trajectories/
 trajectories */
