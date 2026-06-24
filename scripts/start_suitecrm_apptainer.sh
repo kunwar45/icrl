@@ -120,8 +120,12 @@ start_instances() {
 
     apptainer instance list
     echo ""
+    WA_SUITECRM_URL="http://$(hostname):8080/public"
     echo "SuiteCRM URL for compute nodes:"
-    echo "  WA_SUITECRM=http://$(hostname):8080/public"
+    echo "  WA_SUITECRM=${WA_SUITECRM_URL}"
+    # Persist to scratch so SLURM jobs can pick it up even if /home Lustre is degraded
+    printf 'WA_SUITECRM=%s\n' "${WA_SUITECRM_URL}" > "/scratch/${USER}/icrl_wa_env"
+    echo "  → saved to /scratch/${USER}/icrl_wa_env"
 }
 
 wait_for_http() {

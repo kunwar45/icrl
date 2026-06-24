@@ -198,6 +198,14 @@ if [ "${PREFLIGHT_EXIT}" -ne 0 ]; then
 fi
 echo ""
 
+# WA_SUITECRM fallback: if not already in the environment, try the scratch file
+# written by start_suitecrm_apptainer.sh (avoids depending on /home Lustre).
+if [ -z "${WA_SUITECRM:-}" ] && [ -f "/scratch/${USER}/icrl_wa_env" ]; then
+    WA_SUITECRM="$(grep '^WA_SUITECRM=' "/scratch/${USER}/icrl_wa_env" | cut -d= -f2-)"
+    export WA_SUITECRM
+    echo "[$(date +%H:%M:%S)] Loaded WA_SUITECRM from /scratch/${USER}/icrl_wa_env: ${WA_SUITECRM}"
+fi
+
 # Load .env defaults without overriding vars already set in the environment
 # (vars passed via the submitting shell or sbatch --export take precedence)
 _DOTENV="${SLURM_SUBMIT_DIR:-.}/.env"
