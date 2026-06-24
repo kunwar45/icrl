@@ -120,6 +120,11 @@ opentelemetry-sdk
 opentelemetry-api
 opentelemetry-exporter-otlp
 opentelemetry-semantic-conventions
+# structured generation (vLLM runtime deps, discovered missing Jun 23 2026)
+outlines
+interegular
+sentencepiece
+numba
 
 # ── Dev / testing ─────────────────────────────────────────────────────────────
 pytest>=8.2.0

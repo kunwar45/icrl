@@ -123,6 +123,10 @@ N_RESOLVED=$(echo "${RESOLVED_TASKS}" | wc -w | tr -d ' ')
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
+# Ensure we run from the project root (same pattern as all other SLURM scripts).
+# Relative paths (scripts/, logs/slurm/) depend on this.
+cd "${SLURM_SUBMIT_DIR:-$(pwd)}"
+
 mkdir -p "${LOG_DIR}" "${OUTPUT_DIR}" "${HF_CACHE}"
 
 export HF_HOME="${HF_CACHE}"
@@ -367,10 +371,19 @@ echo "[$(date +%H:%M:%S)] Waiting for vLLM /health ..."
 MAX_WAIT=900  # Qwen-72B needs ~170s to read from Lustre + shard loading time
 WAITED=0
 until curl -sf "${VLLM_URL%/v1}/health" > /dev/null 2>&1; do
+    # Detect if vLLM crashed so we don't wait the full 900s
+    if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
+        echo "ERROR: vLLM process (PID ${VLLM_PID}) died during startup after ${WAITED}s"
+        echo "Last vLLM log lines:"
+        tail -30 "${LOG_DIR}/vllm_${SLURM_JOB_ID:-local}.log" >&2
+        exit 1
+    fi
     sleep 5
     WAITED=$((WAITED + 5))
     if [ "${WAITED}" -ge "${MAX_WAIT}" ]; then
         echo "ERROR: vLLM did not come up after ${MAX_WAIT}s"
+        echo "Last vLLM log lines:"
+        tail -30 "${LOG_DIR}/vllm_${SLURM_JOB_ID:-local}.log" >&2
         exit 1
     fi
 done

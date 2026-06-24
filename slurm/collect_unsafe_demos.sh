@@ -30,7 +30,8 @@ mkdir -p logs/slurm data/demos
 
 # ── Start vLLM server ─────────────────────────────────────────────────────────
 echo "[$(date)] Starting vLLM server for Qwen-2.5-7B (tensor-parallel=1)..."
-vllm serve Qwen/Qwen2.5-7B-Instruct \
+VLLM_USE_FLASHINFER_SAMPLER=0 python -m vllm.entrypoints.openai.api_server \
+    --model Qwen/Qwen2.5-7B-Instruct \
     --tensor-parallel-size 1 \
     --port 8000 \
     --max-model-len 8192 \
@@ -38,8 +39,23 @@ vllm serve Qwen/Qwen2.5-7B-Instruct \
 VLLM_PID=$!
 
 echo "[$(date)] Waiting for vLLM server to be ready..."
-until curl -sf http://localhost:8000/health > /dev/null 2>&1; do sleep 5; done
-echo "[$(date)] vLLM server ready."
+MAX_WAIT_VLLM=600
+WAITED_VLLM=0
+until curl -sf http://localhost:8000/health > /dev/null 2>&1; do
+    if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
+        echo "ERROR: vLLM process (PID ${VLLM_PID}) died during startup"
+        tail -30 logs/slurm/vllm_unsafe_${SLURM_JOB_ID}.log >&2
+        exit 1
+    fi
+    sleep 5
+    WAITED_VLLM=$((WAITED_VLLM + 5))
+    if [ "${WAITED_VLLM}" -ge "${MAX_WAIT_VLLM}" ]; then
+        echo "ERROR: vLLM did not come up after ${MAX_WAIT_VLLM}s"
+        tail -30 logs/slurm/vllm_unsafe_${SLURM_JOB_ID}.log >&2
+        exit 1
+    fi
+done
+echo "[$(date)] vLLM server ready after ${WAITED_VLLM}s."
 
 # ── Run collection ─────────────────────────────────────────────────────────────
 python scripts/collect_stwebagent_demos.py \

@@ -13,6 +13,6 @@ source "${ICRL_VENV}/bin/activate"
 export STWEBAGENT_ROOT
 export PYTHONPATH="${SLURM_SUBMIT_DIR:-$(pwd)}/gridworld:${SLURM_SUBMIT_DIR:-$(pwd)}/src:${PYTHONPATH:-}"
 
-module load gcc python/3.12 arrow/23.0.1 cuda/12.1 cudnn/8.9 2>/dev/null || true
+module load gcc python/3.12 arrow/23.0.1 cuda/12.9 cudnn apptainer/1.4.5 2>/dev/null || true
 
 # Apptainer is optional — only needed when starting SuiteCRM inline in gen_safe_demos.sh.
