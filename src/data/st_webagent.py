@@ -253,7 +253,18 @@ class STWebAgentBench:
             ) from e
 
         env_id = _ENV_ID_TEMPLATE.format(task_id=task_id)
-        return gymnasium.make(env_id, headless=headless)
+        # --no-sandbox and --disable-dev-shm-usage are required on SLURM compute
+        # nodes where user namespaces are disabled and /dev/shm is undersized.
+        # Without them Chromium crashes silently and every page renders blank.
+        return gymnasium.make(
+            env_id,
+            headless=headless,
+            pw_extra_args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+            ],
+        )
 
     # ── Benchmark evaluator ───────────────────────────────────────────────────
 
