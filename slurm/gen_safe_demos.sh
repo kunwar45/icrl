@@ -364,6 +364,7 @@ VLLM_USE_FLASHINFER_SAMPLER=0 python -m vllm.entrypoints.openai.api_server \
     --max-model-len 8192 \
     --dtype bfloat16 \
     --trust-remote-code \
+    --gpu-memory-utilization 0.55 \
     > "${LOG_DIR}/vllm_${SLURM_JOB_ID:-local}.log" 2>&1 &
 VLLM_PID=$!
 echo "  vLLM PID: ${VLLM_PID} — log: ${LOG_DIR}/vllm_${SLURM_JOB_ID:-local}.log"
