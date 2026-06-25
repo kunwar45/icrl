@@ -29,6 +29,12 @@
 #   bash scripts/start_suitecrm_apptainer.sh --rebuild-sandbox  # re-extract SIF → sandbox
 set -euo pipefail
 
+# /home Lustre is degraded on this cluster — redirect apptainer instance state
+# to /scratch so instance JSON files are written to a healthy filesystem.
+_APTY_HOME="/scratch/${USER}"
+mkdir -p "${_APTY_HOME}/.apptainer"
+apptainer() { HOME="${_APTY_HOME}" command apptainer "$@"; }
+
 MARIADB_SIF="${MARIADB_SIF:-/scratch/${USER}/apptainer/mariadb.sif}"
 SUITECRM_SIF="${SUITECRM_SIF:-/scratch/${USER}/apptainer/suitecrm.sif}"
 SUITECRM_SANDBOX="${SUITECRM_SANDBOX:-/scratch/${USER}/apptainer/suitecrm_sandbox}"

@@ -26,6 +26,12 @@ _WA_ENV_FILE="/scratch/${USER}/icrl_wa_env"
 
 echo "=== ICRL session startup ==="
 
+# /home Lustre is degraded — redirect apptainer instance state to /scratch.
+# Must be set before any apptainer call (including instance list).
+_APTY_HOME="/scratch/${USER}"
+mkdir -p "${_APTY_HOME}/.apptainer"
+apptainer() { HOME="${_APTY_HOME}" command apptainer "$@"; }
+
 # ── 1. Modules ────────────────────────────────────────────────────────────────
 echo "[1/5] Loading modules..."
 module load gcc python/3.12 arrow/23.0.1 cuda/12.9 cudnn apptainer/1.4.5 2>/dev/null || true
