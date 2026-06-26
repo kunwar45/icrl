@@ -258,6 +258,9 @@ def run_episode(
             f"browsergym/STWebAgentBenchEnv.{task_id}",
             headless=True,
             action_mapping=action_set.to_python_code,
+            # Required on SLURM compute nodes: user namespaces disabled → --no-sandbox;
+            # /dev/shm undersized → --disable-dev-shm-usage.
+            pw_extra_args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
         )
 
         obs, _ = env.reset()

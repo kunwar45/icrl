@@ -126,12 +126,10 @@ start_instances() {
 
     apptainer instance list
     echo ""
-    WA_SUITECRM_URL="http://$(hostname):8080/public"
-    echo "SuiteCRM URL for compute nodes:"
-    echo "  WA_SUITECRM=${WA_SUITECRM_URL}"
-    # Persist to scratch so SLURM jobs can pick it up even if /home Lustre is degraded
-    printf 'WA_SUITECRM=%s\n' "${WA_SUITECRM_URL}" > "/scratch/${USER}/icrl_wa_env"
-    echo "  → saved to /scratch/${USER}/icrl_wa_env"
+    # URL is written to scratch AFTER wait_for_http confirms SuiteCRM is up,
+    # so the file always points to a verified, reachable instance.
+    _PENDING_WA_URL="http://$(hostname):8080/public"
+    echo "SuiteCRM starting on $(hostname):8080 — will save URL once HTTP is up."
 }
 
 wait_for_http() {
@@ -150,7 +148,11 @@ wait_for_http() {
             exit 1
         fi
     done
+    local final_url="http://$(hostname):8080/public"
+    printf 'WA_SUITECRM=%s\n' "${final_url}" > "/scratch/${USER}/icrl_wa_env"
     echo "SuiteCRM is up at http://$(hostname):8080"
+    echo "  WA_SUITECRM=${final_url}"
+    echo "  → saved to /scratch/${USER}/icrl_wa_env"
 }
 
 case "${1:-}" in

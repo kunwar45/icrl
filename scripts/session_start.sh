@@ -56,16 +56,29 @@ export PYTHONPATH="${_ICRL_ROOT}/gridworld:${_ICRL_ROOT}/src:${PYTHONPATH:-}"
 echo "[3/5] PYTHONPATH set"
 
 # ── 4. SuiteCRM / Apptainer ───────────────────────────────────────────────────
-echo "[4/5] Checking SuiteCRM Apptainer instances..."
-_RUNNING=$(apptainer instance list 2>/dev/null | awk 'NR>1 {print $1}')
-_HAS_MARIADB=$(echo "$_RUNNING" | grep -c '^mariadb$' || true)
-_HAS_SUITECRM=$(echo "$_RUNNING" | grep -c '^suitecrm$' || true)
+echo "[4/5] Checking SuiteCRM..."
+# First check: is the stored URL actually reachable? (SuiteCRM may be running
+# on a different login node from a previous session.)
+_STORED_URL=""
+[ -f "${_WA_ENV_FILE}" ] && _STORED_URL="$(grep '^WA_SUITECRM=' "${_WA_ENV_FILE}" | cut -d= -f2-)"
 
-if [ "$_HAS_MARIADB" -gt 0 ] && [ "$_HAS_SUITECRM" -gt 0 ]; then
-    echo "      Both instances already running."
+if [ -n "${_STORED_URL}" ] && curl -sf --max-time 5 "${_STORED_URL%/public}" > /dev/null 2>&1; then
+    echo "      SuiteCRM reachable at ${_STORED_URL} (no restart needed)"
 else
-    echo "      Instances not running — starting SuiteCRM (this may take ~1 min)..."
-    bash "${_ICRL_ROOT}/scripts/start_suitecrm_apptainer.sh"
+    if [ -n "${_STORED_URL}" ]; then
+        echo "      ${_STORED_URL} not reachable — checking local instances..."
+    fi
+    _RUNNING=$(apptainer instance list 2>/dev/null | awk 'NR>1 {print $1}')
+    _HAS_MARIADB=$(echo "$_RUNNING" | grep -c '^mariadb$' || true)
+    _HAS_SUITECRM=$(echo "$_RUNNING" | grep -c '^suitecrm$' || true)
+
+    if [ "$_HAS_MARIADB" -gt 0 ] && [ "$_HAS_SUITECRM" -gt 0 ]; then
+        echo "      Local instances running but HTTP not up yet — waiting..."
+        bash "${_ICRL_ROOT}/scripts/start_suitecrm_apptainer.sh" --status
+    else
+        echo "      Starting SuiteCRM on $(hostname) (this may take ~1 min)..."
+        bash "${_ICRL_ROOT}/scripts/start_suitecrm_apptainer.sh"
+    fi
 fi
 
 # ── 5. WA_SUITECRM env var ────────────────────────────────────────────────────
