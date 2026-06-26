@@ -62,8 +62,13 @@ echo "[4/5] Checking SuiteCRM..."
 _STORED_URL=""
 [ -f "${_WA_ENV_FILE}" ] && _STORED_URL="$(grep '^WA_SUITECRM=' "${_WA_ENV_FILE}" | cut -d= -f2-)"
 
-# Helper: scan all known login nodes for a running SuiteCRM instance.
+# Helper: scan for SuiteCRM. Try localhost first (hostname may not loopback),
+# then all known login nodes.
 _crm_scan() {
+    if curl -sf --max-time 5 "http://localhost:8080" > /dev/null 2>&1; then
+        echo "http://$(hostname):8080/public"
+        return 0
+    fi
     for node in login1 login2 login3 login4 login5; do
         if curl -sf --max-time 5 "http://${node}:8080" > /dev/null 2>&1; then
             echo "http://${node}:8080/public"
@@ -71,6 +76,24 @@ _crm_scan() {
         fi
     done
     return 1
+}
+
+# Helper: wait up to max_wait seconds for localhost:8080, then update env file.
+_wait_local_crm() {
+    local max_wait=600 waited=0
+    echo "      Waiting for SuiteCRM on localhost:8080 (max ${max_wait}s)..."
+    while ! curl -sf --max-time 5 "http://localhost:8080" > /dev/null 2>&1; do
+        sleep 15
+        waited=$((waited + 15))
+        echo "      $(date +%H:%M:%S) still waiting... (${waited}s / ${max_wait}s)"
+        if [ "${waited}" -ge "${max_wait}" ]; then
+            echo "      ERROR: SuiteCRM not up after ${max_wait}s." >&2
+            return 1
+        fi
+    done
+    local url="http://$(hostname):8080/public"
+    printf 'WA_SUITECRM=%s\n' "${url}" > "${_WA_ENV_FILE}"
+    echo "      SuiteCRM is up at ${url} ✓ — env file updated"
 }
 
 if [ -n "${_STORED_URL}" ] && curl -sf --max-time 5 "${_STORED_URL%/public}" > /dev/null 2>&1; then
@@ -86,16 +109,15 @@ else
     if [ -n "${_FOUND_URL}" ]; then
         echo "      Found SuiteCRM at ${_FOUND_URL} — updating env file"
         printf 'WA_SUITECRM=%s\n' "${_FOUND_URL}" > "${_WA_ENV_FILE}"
-        _STORED_URL="${_FOUND_URL}"
     else
-        echo "      Not found on any login node — checking local instances..."
+        echo "      Not found anywhere — checking local apptainer instances..."
         _RUNNING=$(apptainer instance list 2>/dev/null | awk 'NR>1 {print $1}')
         _HAS_MARIADB=$(echo "$_RUNNING" | grep -c '^mariadb$' || true)
         _HAS_SUITECRM=$(echo "$_RUNNING" | grep -c '^suitecrm$' || true)
 
         if [ "$_HAS_MARIADB" -gt 0 ] && [ "$_HAS_SUITECRM" -gt 0 ]; then
-            echo "      Local instances running but HTTP not yet up — waiting..."
-            bash "${_ICRL_ROOT}/scripts/start_suitecrm_apptainer.sh" --status
+            echo "      Instances are running on $(hostname) — waiting for HTTP..."
+            _wait_local_crm
         else
             echo "      Starting SuiteCRM on $(hostname) (may take ~1 min)..."
             bash "${_ICRL_ROOT}/scripts/start_suitecrm_apptainer.sh"

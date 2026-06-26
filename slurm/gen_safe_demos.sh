@@ -209,6 +209,10 @@ fi
 # Verify WA_SUITECRM is reachable. If the stored URL points to the wrong login
 # node (user SSHed into a different one), scan all login nodes automatically.
 _crm_scan() {
+    if curl -sf --max-time 5 "http://localhost:8080" > /dev/null 2>&1; then
+        echo "http://$(hostname):8080/public"
+        return 0
+    fi
     for node in login1 login2 login3 login4 login5; do
         if curl -sf --max-time 5 "http://${node}:8080" > /dev/null 2>&1; then
             echo "http://${node}:8080/public"
