@@ -206,6 +206,38 @@ if [ -z "${WA_SUITECRM:-}" ] && [ -f "/scratch/${USER}/icrl_wa_env" ]; then
     echo "[$(date +%H:%M:%S)] Loaded WA_SUITECRM from /scratch/${USER}/icrl_wa_env: ${WA_SUITECRM}"
 fi
 
+# Verify WA_SUITECRM is reachable. If the stored URL points to the wrong login
+# node (user SSHed into a different one), scan all login nodes automatically.
+_crm_scan() {
+    for node in login1 login2 login3 login4 login5; do
+        if curl -sf --max-time 5 "http://${node}:8080" > /dev/null 2>&1; then
+            echo "http://${node}:8080/public"
+            return 0
+        fi
+    done
+    return 1
+}
+
+if [ -z "${WA_SUITECRM:-}" ]; then
+    echo "[$(date +%H:%M:%S)] WA_SUITECRM not set — scanning login nodes..."
+    WA_SUITECRM="$(_crm_scan)" || true
+fi
+
+if [ -n "${WA_SUITECRM:-}" ] && ! curl -sf --max-time 5 "${WA_SUITECRM%/public}" > /dev/null 2>&1; then
+    echo "[$(date +%H:%M:%S)] ${WA_SUITECRM} not reachable — scanning login nodes..."
+    WA_SUITECRM="$(_crm_scan)" || true
+fi
+
+if [ -z "${WA_SUITECRM:-}" ]; then
+    echo "ERROR: SuiteCRM not found on any login node (login1-5 port 8080)." >&2
+    echo "  Start it from a login node: bash scripts/start_suitecrm_apptainer.sh" >&2
+    exit 1
+fi
+
+export WA_SUITECRM
+printf 'WA_SUITECRM=%s\n' "${WA_SUITECRM}" > "/scratch/${USER}/icrl_wa_env"
+echo "[$(date +%H:%M:%S)] SuiteCRM reachable at ${WA_SUITECRM} ✓"
+
 # Load .env defaults without overriding vars already set in the environment
 # (vars passed via the submitting shell or sbatch --export take precedence)
 _DOTENV="${SLURM_SUBMIT_DIR:-.}/.env"
