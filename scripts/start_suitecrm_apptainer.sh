@@ -67,6 +67,10 @@ require_images() {
         echo "Build with: apptainer build --sandbox ${SUITECRM_SANDBOX} ${SUITECRM_SIF}" >&2
         exit 1
     fi
+    # Alliance clusters auto-bind /project and /scratch into every container.
+    # With --writable, apptainer can't auto-create missing destinations — they
+    # must exist inside the sandbox or startup fails.
+    mkdir -p "${SUITECRM_SANDBOX}/project" "${SUITECRM_SANDBOX}/scratch"
 }
 
 build_sandbox() {
