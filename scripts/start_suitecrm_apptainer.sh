@@ -75,8 +75,11 @@ build_sandbox() {
         echo "  apptainer pull ${SUITECRM_SIF} docker://bitnamilegacy/suitecrm:8" >&2
         exit 1
     fi
+    # /var/tmp has nodev on this cluster which breaks unsquashfs — must use scratch.
+    export APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-/scratch/${USER}/apptainer/tmp}"
+    mkdir -p "${APPTAINER_TMPDIR}" "$(dirname "${SUITECRM_SANDBOX}")"
     echo "Building writable sandbox from ${SUITECRM_SIF}..."
-    mkdir -p "$(dirname "${SUITECRM_SANDBOX}")"
+    echo "  APPTAINER_TMPDIR=${APPTAINER_TMPDIR}"
     apptainer build --sandbox "${SUITECRM_SANDBOX}" "${SUITECRM_SIF}"
     echo "Sandbox ready at ${SUITECRM_SANDBOX}"
 }
@@ -169,7 +172,18 @@ case "${1:-}" in
         ;;
     --rebuild-sandbox)
         echo "Deleting and rebuilding SuiteCRM sandbox from SIF..."
-        rm -rf "${SUITECRM_SANDBOX}"
+        # Move instead of rm -rf: if a previous container failed mid-cleanup,
+        # bind-mounts under the sandbox make rm fail with "Device or resource busy".
+        # Rename sidesteps that; the .old dir can be deleted later (or next boot).
+        if [ -e "${SUITECRM_SANDBOX}" ]; then
+            _OLD="${SUITECRM_SANDBOX}.old"
+            rm -rf "${_OLD}" 2>/dev/null || true
+            mv "${SUITECRM_SANDBOX}" "${_OLD}" || {
+                echo "ERROR: could not move ${SUITECRM_SANDBOX} — kill lingering apptainer processes:" >&2
+                echo "  fuser -k ${SUITECRM_SANDBOX}" >&2
+                exit 1
+            }
+        fi
         build_sandbox
         echo "Done. Run 'bash scripts/start_suitecrm_apptainer.sh' to start."
         ;;
