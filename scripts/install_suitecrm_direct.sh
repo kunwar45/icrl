@@ -87,7 +87,6 @@ apptainer exec -w \
         --db_password=bitnami123 \
         --site_username=admin \
         --site_password=Admin1234! \
-        --site_email=admin@example.com \
         --no-interaction 2>&1
 
 echo "Install command exited with status $?"
