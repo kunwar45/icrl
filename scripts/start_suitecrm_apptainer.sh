@@ -194,8 +194,19 @@ start_instances() {
         --env MARIADB_PASSWORD=bitnami123 \
         "${MARIADB_SIF}" "${MARIADB_INSTANCE}"
 
-    echo "Waiting 30 s for MariaDB..."
-    sleep 30
+    echo "Waiting for MariaDB to accept connections (up to 120s)..."
+    local _mdb_waited=0
+    until apptainer exec instance://"${MARIADB_INSTANCE}" \
+        mysql -ubn_suitecrm -pbitnami123 bitnami_suitecrm -e "SELECT 1" > /dev/null 2>&1; do
+        sleep 5
+        _mdb_waited=$((_mdb_waited + 5))
+        echo "  MariaDB not ready yet (${_mdb_waited}s)..."
+        if [ "${_mdb_waited}" -ge 120 ]; then
+            echo "ERROR: MariaDB did not become ready after 120s" >&2
+            exit 1
+        fi
+    done
+    echo "  MariaDB ready after ${_mdb_waited}s."
 
     echo "Starting SuiteCRM instance (sandbox: ${SUITECRM_SANDBOX})..."
     apptainer instance run \
