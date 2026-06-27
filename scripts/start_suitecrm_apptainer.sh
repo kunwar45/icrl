@@ -17,10 +17,13 @@
 #   mkdir -p /scratch/$USER/apptainer/tmp
 #   export APPTAINER_TMPDIR=/scratch/$USER/apptainer/tmp
 #   apptainer pull /scratch/$USER/apptainer/mariadb.sif docker://bitnamilegacy/mariadb:11.4
-#   apptainer pull /scratch/$USER/apptainer/suitecrm.sif docker://bitnamilegacy/suitecrm:8
+#   apptainer pull /scratch/$USER/apptainer/suitecrm.sif docker://bitnami/suitecrm:8
 #   # Build the writable sandbox (only needed once):
 #   apptainer build --sandbox /scratch/$USER/apptainer/suitecrm_sandbox \
 #       /scratch/$USER/apptainer/suitecrm.sif
+#   # Or build directly from Docker Hub (no .sif intermediate):
+#   apptainer build --sandbox /scratch/$USER/apptainer/suitecrm_sandbox \
+#       docker://bitnami/suitecrm:8
 #
 # Usage:
 #   bash scripts/start_suitecrm_apptainer.sh                # start + wait for HTTP
@@ -30,10 +33,9 @@
 #   bash scripts/start_suitecrm_apptainer.sh --fresh-install    # wipe data + reinstall
 #
 # Port notes:
-#   Bitnami's appinit always writes port 8080 to the live Apache conf/ directory,
-#   regardless of APACHE_HTTP_PORT_NUMBER or pre-patched conf files.
-#   This script works around that by exec-ing into the running instance after
-#   appinit finishes, patching the conf files from inside, and restarting Apache.
+#   bitnami/suitecrm:8 (non-legacy) respects APACHE_HTTP_PORT_NUMBER, so Apache
+#   starts on SUITECRM_HTTP_PORT directly. The exec-fix-apache fallback below is
+#   kept in case the image still writes 8080, and for --writable sandbox quirks.
 set -euo pipefail
 
 # /home Lustre is degraded on some clusters — redirect apptainer instance state
@@ -99,7 +101,7 @@ require_images() {
     fi
     if [ ! -d "${SUITECRM_SANDBOX}" ]; then
         echo "ERROR: missing sandbox ${SUITECRM_SANDBOX}" >&2
-        echo "Build with: apptainer build --sandbox ${SUITECRM_SANDBOX} ${SUITECRM_SIF}" >&2
+        echo "Build with: apptainer build --sandbox ${SUITECRM_SANDBOX} docker://bitnami/suitecrm:8" >&2
         exit 1
     fi
     # Alliance clusters auto-bind /project and /scratch into every container.
@@ -111,7 +113,7 @@ require_images() {
 build_sandbox() {
     if [ ! -f "${SUITECRM_SIF}" ]; then
         echo "ERROR: missing ${SUITECRM_SIF} — pull first:" >&2
-        echo "  apptainer pull ${SUITECRM_SIF} docker://bitnamilegacy/suitecrm:8" >&2
+        echo "  apptainer pull ${SUITECRM_SIF} docker://bitnami/suitecrm:8" >&2
         exit 1
     fi
     export APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-${_SCRATCH}/apptainer/tmp}"
@@ -212,11 +214,17 @@ start_instances() {
     apptainer instance run \
         --writable \
         --bind "${SUITECRM_DATA}/app:/bitnami/suitecrm" \
+        --env APACHE_HTTP_PORT_NUMBER="${SUITECRM_HTTP_PORT}" \
+        --env APACHE_HTTPS_PORT_NUMBER="$((SUITECRM_HTTP_PORT + 1))" \
         --env SUITECRM_DATABASE_HOST=127.0.0.1 \
         --env SUITECRM_DATABASE_PORT_NUMBER=3306 \
         --env SUITECRM_DATABASE_USER=bn_suitecrm \
         --env SUITECRM_DATABASE_NAME=bitnami_suitecrm \
         --env SUITECRM_DATABASE_PASSWORD=bitnami123 \
+        --env SUITECRM_USERNAME=admin \
+        --env SUITECRM_PASSWORD=Admin1234! \
+        --env SUITECRM_EMAIL=admin@example.com \
+        --env SUITECRM_HOST="$(hostname)" \
         --env ALLOW_EMPTY_PASSWORD=yes \
         "${SUITECRM_SANDBOX}" "${SUITECRM_INSTANCE}"
 
@@ -231,27 +239,45 @@ wait_for_http() {
     local max_wait=900
     local waited=0
     local apache_fixed=0
-    echo "Waiting for SuiteCRM at ${url} (first boot ~10-15 min, subsequent ~1 min)..."
+    echo "Waiting for SuiteCRM (first boot ~10-15 min, subsequent ~1 min)..."
+    echo "  Polling: ${url}"
     echo "  Log: ${log}"
     until curl -sf "${url}" > /dev/null 2>&1; do
         sleep 15
         waited=$((waited + 15))
         echo "  $(date +%H:%M:%S) waiting... (${waited}s / ${max_wait}s)"
 
-        # Detect Bitnami's hardcoded port 8080 conflict and fix it from inside.
-        # appinit always writes 8080 regardless of env vars or pre-patched files;
-        # we exec in after appinit to patch the live conf/ and restart Apache.
+        # Bitnami always starts Apache on port 8080 regardless of env vars.
+        # If port 8080 is free on this node, Apache starts there successfully —
+        # accept it and update our port so the URL is saved correctly.
+        if [ "${SUITECRM_HTTP_PORT}" != "8080" ] && \
+           curl -sf "http://localhost:8080" > /dev/null 2>&1; then
+            echo "  Bitnami started Apache on port 8080 — accepting."
+            SUITECRM_HTTP_PORT=8080
+            url="http://localhost:8080"
+            continue
+        fi
+
+        # Fast-fail: installation wizard failed (DB error, missing files, etc.)
+        if [ -f "${log}" ] && grep -q "Installation failed" "${log}" 2>/dev/null; then
+            echo "" >&2
+            echo "ERROR: SuiteCRM installation wizard failed." >&2
+            echo "Last 30 log lines:" >&2
+            tail -30 "${log}" >&2
+            exit 1
+        fi
+
+        # Port conflict: Bitnami wrote 8080 but that port is taken on this node.
+        # Exec into the running instance, patch the live conf/, restart Apache.
         if [ "${apache_fixed}" -eq 0 ] && [ -f "${log}" ] && \
            grep -qE "Address already in use|AH00072" "${log}" 2>/dev/null; then
-            echo "  Bitnami wrote port 8080 — fixing Apache port via exec..."
+            echo "  Port 8080 taken — exec-patching Apache to ${SUITECRM_HTTP_PORT}..."
             if _exec_fix_apache_port; then
                 apache_fixed=1
-                # Clear stale port-conflict errors so the loop doesn't re-trigger
                 > "${log}" 2>/dev/null || true
-                echo "  Port fix applied. Continuing to wait for HTTP..."
+                echo "  Port fix applied. Continuing to wait..."
             else
                 echo "ERROR: exec port fix failed." >&2
-                echo "  Is the instance still running? Check: apptainer instance list" >&2
                 exit 1
             fi
         fi
