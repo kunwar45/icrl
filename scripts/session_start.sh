@@ -27,9 +27,9 @@ _WA_ENV_FILE="${_SCRATCH}/icrl_wa_env"
 
 echo "=== ICRL session startup ==="
 
-# /home Lustre is degraded — redirect apptainer instance state to /scratch.
-# Must be set before any apptainer call (including instance list).
-_APTY_HOME="/scratch/${USER}"
+# /home Lustre is degraded on some clusters — redirect apptainer instance state
+# to $SCRATCH so instance JSON files are written to a healthy filesystem.
+_APTY_HOME="${SCRATCH:-/scratch/${USER}}"
 mkdir -p "${_APTY_HOME}/.apptainer"
 apptainer() { HOME="${_APTY_HOME}" command apptainer "$@"; }
 

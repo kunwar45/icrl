@@ -29,9 +29,9 @@
 #   bash scripts/start_suitecrm_apptainer.sh --rebuild-sandbox  # re-extract SIF → sandbox
 set -euo pipefail
 
-# /home Lustre is degraded on this cluster — redirect apptainer instance state
-# to /scratch so instance JSON files are written to a healthy filesystem.
-_APTY_HOME="/scratch/${USER}"
+# /home Lustre is degraded on some clusters — redirect apptainer instance state
+# to $SCRATCH so instance JSON files are written to a healthy filesystem.
+_APTY_HOME="${SCRATCH:-/scratch/${USER}}"
 mkdir -p "${_APTY_HOME}/.apptainer"
 apptainer() { HOME="${_APTY_HOME}" command apptainer "$@"; }
 
