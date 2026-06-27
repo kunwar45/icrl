@@ -29,11 +29,11 @@
 #   bash scripts/start_suitecrm_apptainer.sh --rebuild-sandbox  # re-extract SIF → sandbox
 #   bash scripts/start_suitecrm_apptainer.sh --fresh-install    # wipe data + reinstall
 #
-# Port troubleshooting:
-#   APACHE_HTTP_PORT_NUMBER is only respected by Bitnami on FIRST install.
-#   On re-starts, Bitnami reads the port from the existing config.php in
-#   SUITECRM_DATA/app and reconfigures Apache to match (ignoring the env var).
-#   If the port is wrong, use --fresh-install to wipe the data and reinstall.
+# Port notes:
+#   Bitnami's appinit always writes port 8080 to the live Apache conf/ directory,
+#   regardless of APACHE_HTTP_PORT_NUMBER or pre-patched conf files.
+#   This script works around that by exec-ing into the running instance after
+#   appinit finishes, patching the conf files from inside, and restarting Apache.
 set -euo pipefail
 
 # /home Lustre is degraded on some clusters — redirect apptainer instance state
@@ -57,7 +57,6 @@ _find_free_port() {
     for p in $(seq 19080 19099); do
         ss -tlnp 2>/dev/null | grep -qE ":${p}[[:space:]]|:${p}$" || { echo "${p}"; return 0; }
     done
-    # fallback: let the OS pick an ephemeral port
     python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()" 2>/dev/null || echo "19080"
 }
 if [ -z "${SUITECRM_HTTP_PORT:-}" ]; then
@@ -102,8 +101,7 @@ build_sandbox() {
         echo "  apptainer pull ${SUITECRM_SIF} docker://bitnamilegacy/suitecrm:8" >&2
         exit 1
     fi
-    # /var/tmp has nodev on this cluster which breaks unsquashfs — must use scratch.
-    export APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-/scratch/${USER}/apptainer/tmp}"
+    export APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-${_SCRATCH}/apptainer/tmp}"
     mkdir -p "${APPTAINER_TMPDIR}" "$(dirname "${SUITECRM_SANDBOX}")"
     echo "Building writable sandbox from ${SUITECRM_SIF}..."
     echo "  APPTAINER_TMPDIR=${APPTAINER_TMPDIR}"
@@ -111,38 +109,57 @@ build_sandbox() {
     echo "Sandbox ready at ${SUITECRM_SANDBOX}"
 }
 
-# Bitnami only honours APACHE_HTTP_PORT_NUMBER on first install.
-# On re-starts with existing data the init script skips port configuration,
-# leaving hardcoded 8080/8081 in the sandbox's Apache conf files.
-# We patch them directly on the host before launching the container.
-_patch_apache_port() {
-    local http_port="${SUITECRM_HTTP_PORT}"
-    local https_port=$((http_port + 363))  # preserve 8080→8443 gap
-    local patched=0
-    while IFS= read -r f; do
-        if grep -qE "808[01]" "$f" 2>/dev/null; then
-            sed -i \
-                -e "s/Listen 8080/Listen ${http_port}/g" \
-                -e "s/:8080>/:${http_port}>/g" \
-                -e "s/Listen 8081/Listen $((http_port + 1))/g" \
-                -e "s/:8081>/:$((http_port + 1))>/g" \
-                -e "s/Listen 8443/Listen ${https_port}/g" \
-                -e "s/:8443>/:${https_port}>/g" \
-                "$f"
-            echo "  patched: ${f#${SUITECRM_SANDBOX}}"
-            patched=$((patched + 1))
-        fi
-    done < <(find "${SUITECRM_SANDBOX}/opt/bitnami" -name "*.conf" -type f 2>/dev/null)
-    if [ "${patched}" -eq 0 ]; then
-        echo "  (no 808x ports found — already patched or unexpected layout)"
-    fi
-}
-
 stop_instances() {
     load_apptainer
     apptainer instance stop "${SUITECRM_INSTANCE}" 2>/dev/null || true
     apptainer instance stop "${MARIADB_INSTANCE}" 2>/dev/null || true
     echo "Stopped ${MARIADB_INSTANCE} and ${SUITECRM_INSTANCE} instances."
+}
+
+# Exec into the running SuiteCRM instance, patch Apache conf files to use
+# SUITECRM_HTTP_PORT, and restart Apache.
+#
+# WHY exec-based instead of pre-patching host files:
+#   Bitnami's appinit always runs "Configuring the HTTP port" which writes
+#   port 8080 into the live conf/ directory, overriding any pre-patched files
+#   and ignoring the APACHE_HTTP_PORT_NUMBER env var. The only reliable approach
+#   is to patch AFTER appinit writes the files (from inside the container).
+_exec_fix_apache_port() {
+    local port="${SUITECRM_HTTP_PORT}"
+    local next=$((port + 1))
+    echo "  Exec-patching Apache config inside ${SUITECRM_INSTANCE} instance..."
+    apptainer exec instance://"${SUITECRM_INSTANCE}" bash -s <<INNERSCRIPT
+set -e
+PATCHED=0
+while IFS= read -r f; do
+    if grep -qE '8080|8081' "\$f" 2>/dev/null; then
+        sed -i \
+            -e 's/Listen 8080/Listen ${port}/g' \
+            -e 's/:8080>/:${port}>/g' \
+            -e 's/Listen 8081/Listen ${next}/g' \
+            -e 's/:8081>/:${next}>/g' \
+            "\$f"
+        echo "    patched: \$f"
+        PATCHED=\$((PATCHED + 1))
+    fi
+done < <(find /opt/bitnami/apache -name '*.conf' -type f 2>/dev/null)
+echo "  Patched \${PATCHED} file(s)."
+
+HTTPD=\$(find /opt/bitnami -name 'httpd' -perm -u+x 2>/dev/null | grep -v '\.bak' | head -1)
+if [ -z "\$HTTPD" ]; then
+    echo "ERROR: httpd binary not found inside container" >&2
+    find /opt/bitnami -name 'httpd' 2>/dev/null >&2
+    exit 1
+fi
+CONF=\$(find /opt/bitnami/apache/conf -maxdepth 1 -name 'httpd.conf' 2>/dev/null | head -1)
+echo "  Stopping old Apache (\$HTTPD)..."
+"\$HTTPD" -k stop 2>/dev/null || killall httpd 2>/dev/null || true
+sleep 3
+echo "  Starting Apache on port ${port}..."
+"\$HTTPD" -f "\$CONF" 2>&1 &
+disown
+echo "  Apache restarted (port ${port})"
+INNERSCRIPT
 }
 
 start_instances() {
@@ -167,15 +184,6 @@ start_instances() {
     echo "Waiting 30 s for MariaDB..."
     sleep 30
 
-    # Patch hardcoded port 8080 in sandbox Apache configs before starting.
-    # APACHE_HTTP_PORT_NUMBER env var is only applied on first install;
-    # re-runs with existing /bitnami/suitecrm data skip re-configuration.
-    echo "Patching sandbox Apache config: 8080 → ${SUITECRM_HTTP_PORT}..."
-    _patch_apache_port
-
-    # Use --writable sandbox: AllowSetuidMountExtfs=false on this cluster means
-    # --overlay ext3 fails; --writable-tmpfs fills the default 64 MB tmpfs.
-    # The sandbox on /scratch has no space constraints.
     echo "Starting SuiteCRM instance (sandbox: ${SUITECRM_SANDBOX})..."
     apptainer instance run \
         --writable \
@@ -186,14 +194,10 @@ start_instances() {
         --env SUITECRM_DATABASE_NAME=bitnami_suitecrm \
         --env SUITECRM_DATABASE_PASSWORD=bitnami123 \
         --env ALLOW_EMPTY_PASSWORD=yes \
-        --env APACHE_HTTP_PORT_NUMBER="${SUITECRM_HTTP_PORT}" \
         "${SUITECRM_SANDBOX}" "${SUITECRM_INSTANCE}"
 
     apptainer instance list
     echo ""
-    # URL is written to scratch AFTER wait_for_http confirms SuiteCRM is up,
-    # so the file always points to a verified, reachable instance.
-    _PENDING_WA_URL="http://$(hostname):${SUITECRM_HTTP_PORT}/public"
     echo "SuiteCRM starting on $(hostname):${SUITECRM_HTTP_PORT} — will save URL once HTTP is up."
 }
 
@@ -202,6 +206,7 @@ wait_for_http() {
     local log="${_APTY_HOME}/.apptainer/instances/logs/$(hostname)/${USER}/suitecrm.err"
     local max_wait=900
     local waited=0
+    local apache_fixed=0
     echo "Waiting for SuiteCRM at ${url} (first boot ~10-15 min, subsequent ~1 min)..."
     echo "  Log: ${log}"
     until curl -sf "${url}" > /dev/null 2>&1; do
@@ -209,18 +214,25 @@ wait_for_http() {
         waited=$((waited + 15))
         echo "  $(date +%H:%M:%S) waiting... (${waited}s / ${max_wait}s)"
 
-        # Fast-fail: detect port conflict within one sleep cycle instead of 900s
-        if [ -f "${log}" ] && grep -qE "Address already in use|AH00072|Cannot bind to port" "${log}" 2>/dev/null; then
-            echo "" >&2
-            echo "ERROR: Port ${SUITECRM_HTTP_PORT} is already in use — Apache cannot start." >&2
-            grep -E "Address already in use|AH00072|Cannot bind" "${log}" | tail -5 >&2
-            echo "" >&2
-            echo "Re-run without SUITECRM_HTTP_PORT to auto-select a free port:" >&2
-            echo "  unset SUITECRM_HTTP_PORT && bash scripts/start_suitecrm_apptainer.sh" >&2
-            exit 1
+        # Detect Bitnami's hardcoded port 8080 conflict and fix it from inside.
+        # appinit always writes 8080 regardless of env vars or pre-patched files;
+        # we exec in after appinit to patch the live conf/ and restart Apache.
+        if [ "${apache_fixed}" -eq 0 ] && [ -f "${log}" ] && \
+           grep -qE "Address already in use|AH00072" "${log}" 2>/dev/null; then
+            echo "  Bitnami wrote port 8080 — fixing Apache port via exec..."
+            if _exec_fix_apache_port; then
+                apache_fixed=1
+                # Clear stale port-conflict errors so the loop doesn't re-trigger
+                > "${log}" 2>/dev/null || true
+                echo "  Port fix applied. Continuing to wait for HTTP..."
+            else
+                echo "ERROR: exec port fix failed." >&2
+                echo "  Is the instance still running? Check: apptainer instance list" >&2
+                exit 1
+            fi
         fi
 
-        # Print recent log lines every 60s so you can see what's happening
+        # Print recent log lines every 60s
         if [ $((waited % 60)) -eq 0 ] && [ -f "${log}" ]; then
             echo "  -- last log lines --"
             tail -5 "${log}" | sed 's/^/  /'
@@ -229,11 +241,7 @@ wait_for_http() {
 
         if [ "${waited}" -ge "${max_wait}" ]; then
             echo "ERROR: SuiteCRM did not respond after ${max_wait}s." >&2
-            if [ -f "${log}" ]; then
-                echo "Last 20 log lines:" >&2
-                tail -20 "${log}" >&2
-            fi
-            echo "To rebuild sandbox: bash scripts/start_suitecrm_apptainer.sh --rebuild-sandbox" >&2
+            [ -f "${log}" ] && { echo "Last 20 log lines:" >&2; tail -20 "${log}" >&2; }
             exit 1
         fi
     done
