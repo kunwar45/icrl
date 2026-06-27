@@ -20,9 +20,10 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 fi
 
 _ICRL_ROOT="${ICRL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-_VENV="${ICRL_VENV:-/scratch/${USER}/venvs/icrl_v4}"
-_STWEB_ROOT="${STWEBAGENT_ROOT:-/scratch/${USER}/ST-WebAgentBench}"
-_WA_ENV_FILE="/scratch/${USER}/icrl_wa_env"
+_SCRATCH="${SCRATCH:-/scratch/${USER}}"
+_VENV="${ICRL_VENV:-${_SCRATCH}/venvs/icrl_v4}"
+_STWEB_ROOT="${STWEBAGENT_ROOT:-${_SCRATCH}/ST-WebAgentBench}"
+_WA_ENV_FILE="${_SCRATCH}/icrl_wa_env"
 
 echo "=== ICRL session startup ==="
 
@@ -92,7 +93,7 @@ _wait_local_crm() {
         fi
     done
     local url="http://$(hostname):8080/public"
-    printf 'WA_SUITECRM=%s\n' "${url}" > "${_WA_ENV_FILE}"
+    printf 'WA_SUITECRM=%s\n' "${url}" > "${_WA_ENV_FILE:-${_SCRATCH}/icrl_wa_env}"
     echo "      SuiteCRM is up at ${url} ✓ — env file updated"
 }
 

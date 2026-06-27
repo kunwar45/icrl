@@ -35,10 +35,11 @@ _APTY_HOME="/scratch/${USER}"
 mkdir -p "${_APTY_HOME}/.apptainer"
 apptainer() { HOME="${_APTY_HOME}" command apptainer "$@"; }
 
-MARIADB_SIF="${MARIADB_SIF:-/scratch/${USER}/apptainer/mariadb.sif}"
-SUITECRM_SIF="${SUITECRM_SIF:-/scratch/${USER}/apptainer/suitecrm.sif}"
-SUITECRM_SANDBOX="${SUITECRM_SANDBOX:-/scratch/${USER}/apptainer/suitecrm_sandbox}"
-SUITECRM_DATA="${SUITECRM_DATA:-/scratch/${USER}/suitecrm}"
+_SCRATCH="${SCRATCH:-/scratch/${USER}}"
+MARIADB_SIF="${MARIADB_SIF:-${_SCRATCH}/apptainer/mariadb.sif}"
+SUITECRM_SIF="${SUITECRM_SIF:-${_SCRATCH}/apptainer/suitecrm.sif}"
+SUITECRM_SANDBOX="${SUITECRM_SANDBOX:-${_SCRATCH}/apptainer/suitecrm_sandbox}"
+SUITECRM_DATA="${SUITECRM_DATA:-${_SCRATCH}/suitecrm}"
 MARIADB_INSTANCE="${MARIADB_INSTANCE:-mariadb}"
 SUITECRM_INSTANCE="${SUITECRM_INSTANCE:-suitecrm}"
 
@@ -156,7 +157,7 @@ wait_for_http() {
         fi
     done
     local final_url="http://$(hostname):8080/public"
-    printf 'WA_SUITECRM=%s\n' "${final_url}" > "/scratch/${USER}/icrl_wa_env"
+    printf 'WA_SUITECRM=%s\n' "${final_url}" > "${_SCRATCH}/icrl_wa_env"
     echo "SuiteCRM is up at http://$(hostname):8080"
     echo "  WA_SUITECRM=${final_url}"
     echo "  → saved to /scratch/${USER}/icrl_wa_env"

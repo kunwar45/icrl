@@ -54,7 +54,24 @@ pip install --upgrade pip wheel
 # ── 4. icrl package + core requirements ───────────────────────────────────────
 log "Installing icrl requirements..."
 pip install -e "${ICRL_ROOT}"
-pip install -r "${ICRL_ROOT}/requirements.txt"
+
+# Alliance/Killarney: the computecanada vllm wheels are broken (invalid .dist-info).
+# Install everything else first, then install vllm from PyPI separately.
+# Requires: module load gcc arrow opencv BEFORE activating the venv.
+_TMP_REQS=$(mktemp)
+grep -v '^vllm$' "${ICRL_ROOT}/requirements.txt" > "${_TMP_REQS}"
+pip install -r "${_TMP_REQS}"
+rm -f "${_TMP_REQS}"
+
+log "Installing vllm..."
+if pip install --no-index vllm 2>/dev/null; then
+    log "vllm installed from cluster wheelhouse."
+else
+    log "Cluster vllm wheel unavailable or broken — falling back to PyPI."
+    log "  Alliance prerequisite: module load gcc arrow opencv (before activating venv)"
+    pip install vllm --index-url https://pypi.org/simple/ || \
+        log "WARN: vllm install failed. Re-run after: deactivate && module load gcc arrow opencv && source ${VENV_PATH}/bin/activate"
+fi
 
 # ── 5. BrowserGym (editable, from fork) ───────────────────────────────────────
 log "Installing BrowserGym core..."
@@ -63,7 +80,18 @@ pip install -e "${BROWSERGYM_ROOT}/browsergym/core" --no-deps
 # ── 6. ST-WebAgentBench (editable integration + root package) ─────────────────
 log "Installing ST-WebAgentBench..."
 pip install -e "${STWEB_ROOT}/browsergym/stwebagentbench" --no-deps
-pip install -r "${STWEB_ROOT}/requirements.txt"
+
+# ST-WebAgentBench/requirements.txt pins browsergym==0.7.0 which requires
+# playwright<1.40. Alliance clusters only ship playwright>=1.57, so skip that
+# pin — we already have a compatible browsergym from our BrowserGym fork.
+_TMP_STWEB=$(mktemp)
+grep -v '^browsergym' "${STWEB_ROOT}/requirements.txt" > "${_TMP_STWEB}"
+pip install -r "${_TMP_STWEB}"
+rm -f "${_TMP_STWEB}"
+
+# ST-WebAgentBench's requirements may pull an older browsergym-core from PyPI.
+# Reinstall our version from the local fork to win.
+pip install -e "${BROWSERGYM_ROOT}/browsergym/core" --no-deps
 
 # Make stwebagentbench root importable (custom_env, evaluators, etc.)
 SITE_PACKAGES="$(python -c 'import site; print(site.getsitepackages()[0])')"
