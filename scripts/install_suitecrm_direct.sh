@@ -118,9 +118,13 @@ until apptainer exec instance://"${MARIADB_INSTANCE}" \
 done
 echo "  MariaDB ready."
 
-# ── Show installer help (uncomment to inspect args) ───────────────────────────
-# apptainer exec -w -B "${SUITECRM_DATA}/app:/bitnami/suitecrm" \
-#     "${SUITECRM_SANDBOX}" "${_php}" "${_console}" suitecrm:app:install --help
+# ── Wipe previous install artifacts so fresh DB doesn't cause bootstrap crash ──
+rm -f "${SUITECRM_DATA}/app/public/legacy/config.php" \
+      "${SUITECRM_DATA}/app/public/legacy/config_override.php" \
+      "${SUITECRM_DATA}/app/public/legacy/install.log" \
+      "${SUITECRM_DATA}/app/config_si.php" \
+      "${SUITECRM_DATA}/app/.env.local" \
+      "${SUITECRM_DATA}/app/.initialized" 2>/dev/null || true
 
 # ── Run suitecrm:app:install ──────────────────────────────────────────────────
 echo "Running suitecrm:app:install (this takes ~5 min)..."
