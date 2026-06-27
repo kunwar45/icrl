@@ -100,12 +100,14 @@ HF_CACHE="${SCRATCH:-/tmp}/hf_cache"
 LOG_DIR="logs/slurm"
 DRY_RUN="${DRY_RUN:-0}"
 
-SUITECRM_DATA="${SUITECRM_DATA:-/scratch/${USER}/suitecrm}"
-MARIADB_SIF="${MARIADB_SIF:-/scratch/${USER}/apptainer/mariadb.sif}"
-SUITECRM_SIF="${SUITECRM_SIF:-/scratch/${USER}/apptainer/suitecrm.sif}"
-SUITECRM_SANDBOX="${SUITECRM_SANDBOX:-/scratch/${USER}/apptainer/suitecrm_sandbox}"
-APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-/scratch/${USER}/apptainer/tmp}"
-SUITECRM_OVERLAY="${SUITECRM_OVERLAY:-/scratch/${USER}/apptainer/suitecrm_overlay.img}"
+_SCRATCH="${SCRATCH:-/scratch/${USER}}"
+SUITECRM_HTTP_PORT="${SUITECRM_HTTP_PORT:-8080}"
+SUITECRM_DATA="${SUITECRM_DATA:-${_SCRATCH}/suitecrm}"
+MARIADB_SIF="${MARIADB_SIF:-${_SCRATCH}/apptainer/mariadb.sif}"
+SUITECRM_SIF="${SUITECRM_SIF:-${_SCRATCH}/apptainer/suitecrm.sif}"
+SUITECRM_SANDBOX="${SUITECRM_SANDBOX:-${_SCRATCH}/apptainer/suitecrm_sandbox}"
+APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-${_SCRATCH}/apptainer/tmp}"
+SUITECRM_OVERLAY="${SUITECRM_OVERLAY:-${_SCRATCH}/apptainer/suitecrm_overlay.img}"
 
 # ── Resolve task list ─────────────────────────────────────────────────────────
 
@@ -134,7 +136,7 @@ export TRANSFORMERS_CACHE="${HF_CACHE}"
 
 # Load cluster modules if available (no-op outside SLURM)
 module load gcc python/3.12 arrow/23.0.1 cuda/12.9 cudnn apptainer/1.4.5 2>/dev/null || true
-source /scratch/kunwar/venvs/icrl_v4/bin/activate 2>/dev/null || true
+source "${ICRL_VENV:-${_SCRATCH}/venvs/icrl_v4}/bin/activate" 2>/dev/null || true
 
 # ── Pre-flight: verify critical imports before wasting GPU time ───────────────
 echo "[$(date +%H:%M:%S)] Pre-flight import check..."
@@ -186,7 +188,7 @@ except Exception as e:
 
 if failures:
     print(f"\nPre-flight FAILED — missing: {', '.join(failures)}", file=sys.stderr)
-    print("Fix: cd icrl && source /scratch/$USER/venvs/icrl_v4/bin/activate && pip install <package>", file=sys.stderr)
+    print("Fix: cd icrl && source $ICRL_VENV/bin/activate && pip install <package>", file=sys.stderr)
     sys.exit(1)
 print("Pre-flight passed.")
 PREFLIGHT
@@ -200,22 +202,23 @@ echo ""
 
 # WA_SUITECRM fallback: if not already in the environment, try the scratch file
 # written by start_suitecrm_apptainer.sh (avoids depending on /home Lustre).
-if [ -z "${WA_SUITECRM:-}" ] && [ -f "/scratch/${USER}/icrl_wa_env" ]; then
-    WA_SUITECRM="$(grep '^WA_SUITECRM=' "/scratch/${USER}/icrl_wa_env" | cut -d= -f2-)"
+if [ -z "${WA_SUITECRM:-}" ] && [ -f "${_SCRATCH}/icrl_wa_env" ]; then
+    WA_SUITECRM="$(grep '^WA_SUITECRM=' "${_SCRATCH}/icrl_wa_env" | cut -d= -f2-)"
     export WA_SUITECRM
-    echo "[$(date +%H:%M:%S)] Loaded WA_SUITECRM from /scratch/${USER}/icrl_wa_env: ${WA_SUITECRM}"
+    echo "[$(date +%H:%M:%S)] Loaded WA_SUITECRM from ${_SCRATCH}/icrl_wa_env: ${WA_SUITECRM}"
 fi
 
 # Verify WA_SUITECRM is reachable. If the stored URL points to the wrong login
 # node (user SSHed into a different one), scan all login nodes automatically.
 _crm_scan() {
-    if curl -sf --max-time 5 "http://localhost:8080" > /dev/null 2>&1; then
-        echo "http://$(hostname):8080/public"
+    local port="${SUITECRM_HTTP_PORT:-8080}"
+    if curl -sf --max-time 5 "http://localhost:${port}" > /dev/null 2>&1; then
+        echo "http://$(hostname):${port}/public"
         return 0
     fi
-    for node in login1 login2 login3 login4 login5; do
-        if curl -sf --max-time 5 "http://${node}:8080" > /dev/null 2>&1; then
-            echo "http://${node}:8080/public"
+    for node in login1 login2 login3 login4 login5 klogin01 klogin02 klogin03 klogin04 klogin05; do
+        if curl -sf --max-time 5 "http://${node}:${port}" > /dev/null 2>&1; then
+            echo "http://${node}:${port}/public"
             return 0
         fi
     done
@@ -233,13 +236,13 @@ if [ -n "${WA_SUITECRM:-}" ] && ! curl -sf --max-time 5 "${WA_SUITECRM%/public}"
 fi
 
 if [ -z "${WA_SUITECRM:-}" ]; then
-    echo "ERROR: SuiteCRM not found on any login node (login1-5 port 8080)." >&2
+    echo "ERROR: SuiteCRM not found on any login node (port ${SUITECRM_HTTP_PORT:-8080})." >&2
     echo "  Start it from a login node: bash scripts/start_suitecrm_apptainer.sh" >&2
     exit 1
 fi
 
 export WA_SUITECRM
-printf 'WA_SUITECRM=%s\n' "${WA_SUITECRM}" > "/scratch/${USER}/icrl_wa_env"
+printf 'WA_SUITECRM=%s\n' "${WA_SUITECRM}" > "${_SCRATCH}/icrl_wa_env"
 echo "[$(date +%H:%M:%S)] SuiteCRM reachable at ${WA_SUITECRM} ✓"
 
 # Load .env defaults without overriding vars already set in the environment
@@ -298,7 +301,7 @@ echo ""
 
 if [ -z "${WA_SUITECRM:-}" ]; then
     if [ "${DRY_RUN}" = "1" ]; then
-        export WA_SUITECRM="http://localhost:8080"
+        export WA_SUITECRM="http://localhost:${SUITECRM_HTTP_PORT:-8080}"
         echo "[$(date +%H:%M:%S)] DRY RUN — skipping Apptainer SuiteCRM startup"
     else
     echo "[$(date +%H:%M:%S)] Starting MariaDB + SuiteCRM via Apptainer..."
@@ -353,7 +356,7 @@ if [ -z "${WA_SUITECRM:-}" ]; then
         --env ALLOW_EMPTY_PASSWORD=yes \
         "${SUITECRM_SANDBOX}" "${CRM_APP}"
 
-    export WA_SUITECRM="http://localhost:8080"
+    export WA_SUITECRM="http://localhost:${SUITECRM_HTTP_PORT:-8080}"
 
     trap 'echo "[$(date +%H:%M:%S)] Stopping Apptainer CRM instances..."; \
           apptainer instance stop "'"${CRM_APP}"'" 2>/dev/null || true; \

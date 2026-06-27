@@ -66,24 +66,26 @@ _STORED_URL=""
 # Helper: scan for SuiteCRM. Try localhost first (hostname may not loopback),
 # then all known login nodes.
 _crm_scan() {
-    if curl -sf --max-time 5 "http://localhost:8080" > /dev/null 2>&1; then
-        echo "http://$(hostname):8080/public"
+    local port="${SUITECRM_HTTP_PORT:-8080}"
+    if curl -sf --max-time 5 "http://localhost:${port}" > /dev/null 2>&1; then
+        echo "http://$(hostname):${port}/public"
         return 0
     fi
-    for node in login1 login2 login3 login4 login5; do
-        if curl -sf --max-time 5 "http://${node}:8080" > /dev/null 2>&1; then
-            echo "http://${node}:8080/public"
+    for node in login1 login2 login3 login4 login5 klogin01 klogin02 klogin03 klogin04 klogin05; do
+        if curl -sf --max-time 5 "http://${node}:${port}" > /dev/null 2>&1; then
+            echo "http://${node}:${port}/public"
             return 0
         fi
     done
     return 1
 }
 
-# Helper: wait up to max_wait seconds for localhost:8080, then update env file.
+# Helper: wait up to max_wait seconds for localhost:${port}, then update env file.
 _wait_local_crm() {
+    local port="${SUITECRM_HTTP_PORT:-8080}"
     local max_wait=600 waited=0
-    echo "      Waiting for SuiteCRM on localhost:8080 (max ${max_wait}s)..."
-    while ! curl -sf --max-time 5 "http://localhost:8080" > /dev/null 2>&1; do
+    echo "      Waiting for SuiteCRM on localhost:${port} (max ${max_wait}s)..."
+    while ! curl -sf --max-time 5 "http://localhost:${port}" > /dev/null 2>&1; do
         sleep 15
         waited=$((waited + 15))
         echo "      $(date +%H:%M:%S) still waiting... (${waited}s / ${max_wait}s)"
@@ -92,7 +94,7 @@ _wait_local_crm() {
             return 1
         fi
     done
-    local url="http://$(hostname):8080/public"
+    local url="http://$(hostname):${port}/public"
     printf 'WA_SUITECRM=%s\n' "${url}" > "${_WA_ENV_FILE:-${_SCRATCH}/icrl_wa_env}"
     echo "      SuiteCRM is up at ${url} ✓ — env file updated"
 }

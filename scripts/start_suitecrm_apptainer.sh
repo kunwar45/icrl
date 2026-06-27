@@ -42,6 +42,7 @@ SUITECRM_SANDBOX="${SUITECRM_SANDBOX:-${_SCRATCH}/apptainer/suitecrm_sandbox}"
 SUITECRM_DATA="${SUITECRM_DATA:-${_SCRATCH}/suitecrm}"
 MARIADB_INSTANCE="${MARIADB_INSTANCE:-mariadb}"
 SUITECRM_INSTANCE="${SUITECRM_INSTANCE:-suitecrm}"
+SUITECRM_HTTP_PORT="${SUITECRM_HTTP_PORT:-8080}"
 
 load_apptainer() {
     if command -v apptainer &>/dev/null; then
@@ -130,18 +131,19 @@ start_instances() {
         --env SUITECRM_DATABASE_NAME=bitnami_suitecrm \
         --env SUITECRM_DATABASE_PASSWORD=bitnami123 \
         --env ALLOW_EMPTY_PASSWORD=yes \
+        --env APACHE_HTTP_PORT_NUMBER="${SUITECRM_HTTP_PORT}" \
         "${SUITECRM_SANDBOX}" "${SUITECRM_INSTANCE}"
 
     apptainer instance list
     echo ""
     # URL is written to scratch AFTER wait_for_http confirms SuiteCRM is up,
     # so the file always points to a verified, reachable instance.
-    _PENDING_WA_URL="http://$(hostname):8080/public"
-    echo "SuiteCRM starting on $(hostname):8080 — will save URL once HTTP is up."
+    _PENDING_WA_URL="http://$(hostname):${SUITECRM_HTTP_PORT}/public"
+    echo "SuiteCRM starting on $(hostname):${SUITECRM_HTTP_PORT} — will save URL once HTTP is up."
 }
 
 wait_for_http() {
-    local url="http://localhost:8080"
+    local url="http://localhost:${SUITECRM_HTTP_PORT}"
     local max_wait=900
     local waited=0
     echo "Waiting for SuiteCRM at ${url} (first boot ~10-15 min, subsequent ~1 min)..."
@@ -156,11 +158,11 @@ wait_for_http() {
             exit 1
         fi
     done
-    local final_url="http://$(hostname):8080/public"
+    local final_url="http://$(hostname):${SUITECRM_HTTP_PORT}/public"
     printf 'WA_SUITECRM=%s\n' "${final_url}" > "${_SCRATCH}/icrl_wa_env"
-    echo "SuiteCRM is up at http://$(hostname):8080"
+    echo "SuiteCRM is up at ${final_url}"
     echo "  WA_SUITECRM=${final_url}"
-    echo "  → saved to /scratch/${USER}/icrl_wa_env"
+    echo "  → saved to ${_SCRATCH}/icrl_wa_env"
 }
 
 case "${1:-}" in
