@@ -70,7 +70,8 @@
 #   2× A100-80GB  → set TP_SIZE=2, --gres=gpu:a100l:2   (L = 80 GB variant)
 #
 #SBATCH --job-name=icrl-gen
-#SBATCH --account=def-s2ganapa_gpu
+#SBATCH --account=aip-s2ganapa
+#SBATCH --partition=gpubase_h100_b2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
@@ -408,7 +409,7 @@ VLLM_USE_FLASHINFER_SAMPLER=0 python -m vllm.entrypoints.openai.api_server \
     --max-model-len 8192 \
     --dtype bfloat16 \
     --trust-remote-code \
-    --gpu-memory-utilization 0.55 \
+    --gpu-memory-utilization 0.85 \
     > "${LOG_DIR}/vllm_${SLURM_JOB_ID:-local}.log" 2>&1 &
 VLLM_PID=$!
 echo "  vLLM PID: ${VLLM_PID} — log: ${LOG_DIR}/vllm_${SLURM_JOB_ID:-local}.log"
