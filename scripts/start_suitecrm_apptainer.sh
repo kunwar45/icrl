@@ -68,6 +68,19 @@ load_apptainer() {
     if command -v apptainer &>/dev/null; then
         return 0
     fi
+    # Source lmod init if module command is not available (non-interactive bash)
+    if ! command -v module &>/dev/null; then
+        for _lmod_init in \
+            /cvmfs/soft.computecanada.ca/nix/var/nix/profiles/16.09/lmod/lmod/init/bash \
+            /cvmfs/soft.computecanada.ca/custom/software/lmod/lmod/init/profile \
+            /etc/profile.d/lmod.sh \
+            /usr/share/lmod/lmod/init/bash; do
+            if [ -f "${_lmod_init}" ]; then
+                # shellcheck disable=SC1090
+                source "${_lmod_init}" 2>/dev/null && break
+            fi
+        done
+    fi
     for mod in apptainer/1.4.5 apptainer/1.3.5; do
         if module load "$mod" 2>/dev/null && command -v apptainer &>/dev/null; then
             echo "Loaded ${mod}"
