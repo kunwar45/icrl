@@ -4,7 +4,8 @@
 # SuiteCRM 8 release zip (SuiteCRM-8.10.1.zip extracted to $SUITECRM_DATA/app/).
 #
 # Usage:
-#   bash scripts/install_suitecrm_direct.sh
+#   bash scripts/install_suitecrm_direct.sh             # full install + start
+#   bash scripts/install_suitecrm_direct.sh --restart   # skip install, just restart Apache
 #
 # Prerequisites:
 #   1. MariaDB SIF: $SCRATCH/apptainer/mariadb.sif
@@ -22,10 +23,58 @@ MARIADB_SIF="${MARIADB_SIF:-${_SCRATCH}/apptainer/mariadb.sif}"
 SUITECRM_SANDBOX="${SUITECRM_SANDBOX:-${_SCRATCH}/apptainer/suitecrm_sandbox}"
 SUITECRM_DATA="${SUITECRM_DATA:-${_SCRATCH}/suitecrm}"
 MARIADB_INSTANCE="${MARIADB_INSTANCE:-mariadb}"
-PORT="${SUITECRM_HTTP_PORT:-8080}"
-
 _php="${SUITECRM_SANDBOX}/opt/bitnami/php/bin/php"
 _console="/bitnami/suitecrm/bin/console"
+_RESTART_ONLY="${1:-}"
+
+_find_free_port() {
+    local p
+    for p in $(seq 19080 19099); do
+        ss -tlnp 2>/dev/null | grep -qE ":${p}[[:space:]]|:${p}$" || { echo "${p}"; return 0; }
+    done
+    echo "19080"
+}
+if [ -z "${SUITECRM_HTTP_PORT:-}" ]; then
+    PORT="$(_find_free_port)"
+    echo "Auto-selected port: ${PORT}"
+else
+    PORT="${SUITECRM_HTTP_PORT}"
+fi
+
+# ── Restart-only mode: free port 8080, restart SuiteCRM instance ──────────────
+if [ "${_RESTART_ONLY}" = "--restart" ]; then
+    echo "Restart mode: freeing port ${PORT} and restarting SuiteCRM instance..."
+    fuser -k "${PORT}/tcp" 2>/dev/null || true
+    apptainer instance stop suitecrm 2>/dev/null || true
+    sleep 3
+    apptainer instance run \
+        --writable \
+        -B "${SUITECRM_DATA}/app:/bitnami/suitecrm" \
+        --env APACHE_HTTP_PORT_NUMBER="${PORT}" \
+        --env APACHE_HTTPS_PORT_NUMBER="$((PORT+1))" \
+        --env SUITECRM_DATABASE_HOST=127.0.0.1 \
+        --env SUITECRM_DATABASE_PORT_NUMBER=3306 \
+        --env SUITECRM_DATABASE_USER=bn_suitecrm \
+        --env SUITECRM_DATABASE_NAME=bitnami_suitecrm \
+        --env SUITECRM_DATABASE_PASSWORD=bitnami123 \
+        --env SUITECRM_USERNAME=admin \
+        --env SUITECRM_PASSWORD=Admin1234! \
+        --env SUITECRM_HOST="$(hostname)" \
+        --env ALLOW_EMPTY_PASSWORD=yes \
+        "${SUITECRM_SANDBOX}" suitecrm
+    echo "Waiting for HTTP on port ${PORT}..."
+    _waited=0
+    until curl -sf "http://localhost:${PORT}" >/dev/null 2>&1; do
+        sleep 10; _waited=$((_waited+10))
+        echo "  ${_waited}s..."
+        [ "${_waited}" -ge 120 ] && { echo "Timeout" >&2; exit 1; }
+    done
+    _url="http://$(hostname):${PORT}/index.php"
+    printf 'WA_SUITECRM=%s\n' "${_url}" > "${_SCRATCH}/icrl_wa_env"
+    echo "SuiteCRM is up at ${_url}"
+    echo "  Login: admin / Admin1234!"
+    exit 0
+fi
 
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 if [ ! -f "${SUITECRM_DATA}/app/bin/console" ]; then
