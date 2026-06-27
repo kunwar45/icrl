@@ -42,7 +42,21 @@ SUITECRM_SANDBOX="${SUITECRM_SANDBOX:-${_SCRATCH}/apptainer/suitecrm_sandbox}"
 SUITECRM_DATA="${SUITECRM_DATA:-${_SCRATCH}/suitecrm}"
 MARIADB_INSTANCE="${MARIADB_INSTANCE:-mariadb}"
 SUITECRM_INSTANCE="${SUITECRM_INSTANCE:-suitecrm}"
-SUITECRM_HTTP_PORT="${SUITECRM_HTTP_PORT:-8080}"
+
+# Auto-select a free port if the caller didn't set one.
+# Scans 19080-19099 (high range, unlikely to collide with other users).
+_find_free_port() {
+    local p
+    for p in $(seq 19080 19099); do
+        ss -tlnp 2>/dev/null | grep -qE ":${p}[[:space:]]|:${p}$" || { echo "${p}"; return 0; }
+    done
+    # fallback: let the OS pick an ephemeral port
+    python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()" 2>/dev/null || echo "19080"
+}
+if [ -z "${SUITECRM_HTTP_PORT:-}" ]; then
+    SUITECRM_HTTP_PORT="$(_find_free_port)"
+    echo "Auto-selected free port: ${SUITECRM_HTTP_PORT}"
+fi
 
 load_apptainer() {
     if command -v apptainer &>/dev/null; then
@@ -144,16 +158,40 @@ start_instances() {
 
 wait_for_http() {
     local url="http://localhost:${SUITECRM_HTTP_PORT}"
+    local log="${_APTY_HOME}/.apptainer/instances/logs/$(hostname)/${USER}/suitecrm.err"
     local max_wait=900
     local waited=0
     echo "Waiting for SuiteCRM at ${url} (first boot ~10-15 min, subsequent ~1 min)..."
+    echo "  Log: ${log}"
     until curl -sf "${url}" > /dev/null 2>&1; do
         sleep 15
         waited=$((waited + 15))
         echo "  $(date +%H:%M:%S) waiting... (${waited}s / ${max_wait}s)"
+
+        # Fast-fail: detect port conflict within one sleep cycle instead of 900s
+        if [ -f "${log}" ] && grep -qE "Address already in use|AH00072|Cannot bind to port" "${log}" 2>/dev/null; then
+            echo "" >&2
+            echo "ERROR: Port ${SUITECRM_HTTP_PORT} is already in use — Apache cannot start." >&2
+            grep -E "Address already in use|AH00072|Cannot bind" "${log}" | tail -5 >&2
+            echo "" >&2
+            echo "Re-run without SUITECRM_HTTP_PORT to auto-select a free port:" >&2
+            echo "  unset SUITECRM_HTTP_PORT && bash scripts/start_suitecrm_apptainer.sh" >&2
+            exit 1
+        fi
+
+        # Print recent log lines every 60s so you can see what's happening
+        if [ $((waited % 60)) -eq 0 ] && [ -f "${log}" ]; then
+            echo "  -- last log lines --"
+            tail -5 "${log}" | sed 's/^/  /'
+            echo "  --------------------"
+        fi
+
         if [ "${waited}" -ge "${max_wait}" ]; then
             echo "ERROR: SuiteCRM did not respond after ${max_wait}s." >&2
-            echo "Check logs: tail ~/.apptainer/instances/logs/\$(hostname)/\$USER/suitecrm.err" >&2
+            if [ -f "${log}" ]; then
+                echo "Last 20 log lines:" >&2
+                tail -20 "${log}" >&2
+            fi
             echo "To rebuild sandbox: bash scripts/start_suitecrm_apptainer.sh --rebuild-sandbox" >&2
             exit 1
         fi
