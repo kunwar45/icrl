@@ -118,6 +118,7 @@ start_instances() {
 
     apptainer instance stop "${SUITECRM_INSTANCE}" 2>/dev/null || true
     apptainer instance stop "${MARIADB_INSTANCE}" 2>/dev/null || true
+    sleep 3  # give apptainer time to clean up instance files before re-creating
 
     echo "Starting MariaDB instance (${MARIADB_SIF})..."
     apptainer instance run \
