@@ -23,10 +23,17 @@
 #       /scratch/$USER/apptainer/suitecrm.sif
 #
 # Usage:
-#   bash scripts/start_suitecrm_apptainer.sh           # start + wait for HTTP
-#   bash scripts/start_suitecrm_apptainer.sh --stop    # stop instances
-#   bash scripts/start_suitecrm_apptainer.sh --status  # list instances
+#   bash scripts/start_suitecrm_apptainer.sh                # start + wait for HTTP
+#   bash scripts/start_suitecrm_apptainer.sh --stop         # stop instances
+#   bash scripts/start_suitecrm_apptainer.sh --status       # list instances
 #   bash scripts/start_suitecrm_apptainer.sh --rebuild-sandbox  # re-extract SIF → sandbox
+#   bash scripts/start_suitecrm_apptainer.sh --fresh-install    # wipe data + reinstall
+#
+# Port troubleshooting:
+#   APACHE_HTTP_PORT_NUMBER is only respected by Bitnami on FIRST install.
+#   On re-starts, Bitnami reads the port from the existing config.php in
+#   SUITECRM_DATA/app and reconfigures Apache to match (ignoring the env var).
+#   If the port is wrong, use --fresh-install to wipe the data and reinstall.
 set -euo pipefail
 
 # /home Lustre is degraded on some clusters — redirect apptainer instance state
@@ -265,6 +272,15 @@ case "${1:-}" in
         fi
         build_sandbox
         echo "Done. Run 'bash scripts/start_suitecrm_apptainer.sh' to start."
+        ;;
+    --fresh-install)
+        echo "Wiping SuiteCRM data (app + mariadb) for clean reinstall..."
+        stop_instances 2>/dev/null || true
+        rm -rf "${SUITECRM_DATA}"
+        mkdir -p "${SUITECRM_DATA}/mariadb" "${SUITECRM_DATA}/app"
+        echo "Data wiped. Starting fresh install (first boot takes ~15 min)..."
+        start_instances
+        wait_for_http
         ;;
     "")
         start_instances
