@@ -104,6 +104,33 @@ build_sandbox() {
     echo "Sandbox ready at ${SUITECRM_SANDBOX}"
 }
 
+# Bitnami only honours APACHE_HTTP_PORT_NUMBER on first install.
+# On re-starts with existing data the init script skips port configuration,
+# leaving hardcoded 8080/8081 in the sandbox's Apache conf files.
+# We patch them directly on the host before launching the container.
+_patch_apache_port() {
+    local http_port="${SUITECRM_HTTP_PORT}"
+    local https_port=$((http_port + 363))  # preserve 8080→8443 gap
+    local patched=0
+    while IFS= read -r f; do
+        if grep -qE "808[01]" "$f" 2>/dev/null; then
+            sed -i \
+                -e "s/Listen 8080/Listen ${http_port}/g" \
+                -e "s/:8080>/:${http_port}>/g" \
+                -e "s/Listen 8081/Listen $((http_port + 1))/g" \
+                -e "s/:8081>/:$((http_port + 1))>/g" \
+                -e "s/Listen 8443/Listen ${https_port}/g" \
+                -e "s/:8443>/:${https_port}>/g" \
+                "$f"
+            echo "  patched: ${f#${SUITECRM_SANDBOX}}"
+            patched=$((patched + 1))
+        fi
+    done < <(find "${SUITECRM_SANDBOX}/opt/bitnami" -name "*.conf" -type f 2>/dev/null)
+    if [ "${patched}" -eq 0 ]; then
+        echo "  (no 808x ports found — already patched or unexpected layout)"
+    fi
+}
+
 stop_instances() {
     load_apptainer
     apptainer instance stop "${SUITECRM_INSTANCE}" 2>/dev/null || true
@@ -132,6 +159,12 @@ start_instances() {
 
     echo "Waiting 30 s for MariaDB..."
     sleep 30
+
+    # Patch hardcoded port 8080 in sandbox Apache configs before starting.
+    # APACHE_HTTP_PORT_NUMBER env var is only applied on first install;
+    # re-runs with existing /bitnami/suitecrm data skip re-configuration.
+    echo "Patching sandbox Apache config: 8080 → ${SUITECRM_HTTP_PORT}..."
+    _patch_apache_port
 
     # Use --writable sandbox: AllowSetuidMountExtfs=false on this cluster means
     # --overlay ext3 fails; --writable-tmpfs fills the default 64 MB tmpfs.
