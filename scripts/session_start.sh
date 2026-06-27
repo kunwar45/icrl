@@ -66,23 +66,34 @@ _STORED_URL=""
 # Helper: scan for SuiteCRM. Try localhost first (hostname may not loopback),
 # then all known login nodes.
 _crm_scan() {
-    local port="${SUITECRM_HTTP_PORT:-8080}"
-    if curl -sf --max-time 5 "http://localhost:${port}" > /dev/null 2>&1; then
-        echo "http://$(hostname):${port}/public"
-        return 0
-    fi
-    for node in login1 login2 login3 login4 login5 klogin01 klogin02 klogin03 klogin04 klogin05; do
-        if curl -sf --max-time 5 "http://${node}:${port}" > /dev/null 2>&1; then
-            echo "http://${node}:${port}/public"
+    local ports=(19080 19081 19082 19083 19084 19085 19086 19087 19088 19089 19090 8080)
+    local p node
+    for p in "${ports[@]}"; do
+        if curl -sf --max-time 3 "http://localhost:${p}" > /dev/null 2>&1; then
+            echo "http://$(hostname):${p}/index.php"
             return 0
         fi
+    done
+    for node in klogin01 klogin02 klogin03 klogin04 klogin05 login1 login2 login3 login4 login5; do
+        for p in "${ports[@]}"; do
+            if curl -sf --max-time 3 "http://${node}:${p}" > /dev/null 2>&1; then
+                echo "http://${node}:${p}/index.php"
+                return 0
+            fi
+        done
     done
     return 1
 }
 
 # Helper: wait up to max_wait seconds for localhost:${port}, then update env file.
 _wait_local_crm() {
-    local port="${SUITECRM_HTTP_PORT:-8080}"
+    # Read port from stored URL if available, else try common ports
+    local port="${SUITECRM_HTTP_PORT:-}"
+    if [ -z "${port}" ] && [ -f "${_WA_ENV_FILE}" ]; then
+        local _stored; _stored="$(grep '^WA_SUITECRM=' "${_WA_ENV_FILE}" | cut -d= -f2-)"
+        port="${_stored##*:}"; port="${port%%/*}"
+    fi
+    port="${port:-8080}"
     local max_wait=600 waited=0
     echo "      Waiting for SuiteCRM on localhost:${port} (max ${max_wait}s)..."
     while ! curl -sf --max-time 5 "http://localhost:${port}" > /dev/null 2>&1; do
@@ -94,12 +105,12 @@ _wait_local_crm() {
             return 1
         fi
     done
-    local url="http://$(hostname):${port}/public"
+    local url="http://$(hostname):${port}/index.php"
     printf 'WA_SUITECRM=%s\n' "${url}" > "${_WA_ENV_FILE:-${_SCRATCH}/icrl_wa_env}"
     echo "      SuiteCRM is up at ${url} ✓ — env file updated"
 }
 
-if [ -n "${_STORED_URL}" ] && curl -sf --max-time 5 "${_STORED_URL%/public}" > /dev/null 2>&1; then
+if [ -n "${_STORED_URL}" ] && curl -sf --max-time 5 "${_STORED_URL%/index.php}" > /dev/null 2>&1; then
     echo "      SuiteCRM reachable at ${_STORED_URL} ✓"
 else
     if [ -n "${_STORED_URL}" ]; then
@@ -121,9 +132,12 @@ else
         if [ "$_HAS_MARIADB" -gt 0 ] && [ "$_HAS_SUITECRM" -gt 0 ]; then
             echo "      Instances are running on $(hostname) — waiting for HTTP..."
             _wait_local_crm
+        elif [ -f "${_SCRATCH}/suitecrm/app/.initialized" ]; then
+            echo "      Restarting SuiteCRM on $(hostname) (fast path)..."
+            bash "${_ICRL_ROOT}/scripts/install_suitecrm_direct.sh" --restart
         else
-            echo "      Starting SuiteCRM on $(hostname) (may take ~1 min)..."
-            bash "${_ICRL_ROOT}/scripts/start_suitecrm_apptainer.sh"
+            echo "      Installing SuiteCRM on $(hostname) (first time, ~2 min)..."
+            bash "${_ICRL_ROOT}/scripts/install_suitecrm_direct.sh"
         fi
     fi
 fi

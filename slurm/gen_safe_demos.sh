@@ -211,16 +211,21 @@ fi
 # Verify WA_SUITECRM is reachable. If the stored URL points to the wrong login
 # node (user SSHed into a different one), scan all login nodes automatically.
 _crm_scan() {
-    local port="${SUITECRM_HTTP_PORT:-8080}"
-    if curl -sf --max-time 5 "http://localhost:${port}" > /dev/null 2>&1; then
-        echo "http://$(hostname):${port}/public"
-        return 0
-    fi
-    for node in login1 login2 login3 login4 login5 klogin01 klogin02 klogin03 klogin04 klogin05; do
-        if curl -sf --max-time 5 "http://${node}:${port}" > /dev/null 2>&1; then
-            echo "http://${node}:${port}/public"
+    local ports=(19080 19081 19082 19083 19084 19085 19086 19087 19088 19089 19090 8080)
+    local p node
+    for p in "${ports[@]}"; do
+        if curl -sf --max-time 3 "http://localhost:${p}" > /dev/null 2>&1; then
+            echo "http://$(hostname):${p}/index.php"
             return 0
         fi
+    done
+    for node in klogin01 klogin02 klogin03 klogin04 klogin05 login1 login2 login3 login4 login5; do
+        for p in "${ports[@]}"; do
+            if curl -sf --max-time 3 "http://${node}:${p}" > /dev/null 2>&1; then
+                echo "http://${node}:${p}/index.php"
+                return 0
+            fi
+        done
     done
     return 1
 }
@@ -230,14 +235,14 @@ if [ -z "${WA_SUITECRM:-}" ]; then
     WA_SUITECRM="$(_crm_scan)" || true
 fi
 
-if [ -n "${WA_SUITECRM:-}" ] && ! curl -sf --max-time 5 "${WA_SUITECRM%/public}" > /dev/null 2>&1; then
+if [ -n "${WA_SUITECRM:-}" ] && ! curl -sf --max-time 5 "${WA_SUITECRM%/index.php}" > /dev/null 2>&1; then
     echo "[$(date +%H:%M:%S)] ${WA_SUITECRM} not reachable — scanning login nodes..."
     WA_SUITECRM="$(_crm_scan)" || true
 fi
 
 if [ -z "${WA_SUITECRM:-}" ]; then
-    echo "ERROR: SuiteCRM not found on any login node (port ${SUITECRM_HTTP_PORT:-8080})." >&2
-    echo "  Start it from a login node: bash scripts/start_suitecrm_apptainer.sh" >&2
+    echo "ERROR: SuiteCRM not found on any login node." >&2
+    echo "  Start it from a login node: bash scripts/install_suitecrm_direct.sh" >&2
     exit 1
 fi
 
