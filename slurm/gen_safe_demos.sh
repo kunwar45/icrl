@@ -422,15 +422,17 @@ trap 'echo "[$(date +%H:%M:%S)] Caught signal — killing vLLM ${VLLM_PID}"; kil
 
 # ── Wait for vLLM health ──────────────────────────────────────────────────────
 
-echo "[$(date +%H:%M:%S)] Waiting for vLLM /health ..."
+echo "[$(date +%H:%M:%S)] Waiting for vLLM startup ..."
 MAX_WAIT=2400  # Qwen-72B: ~10-20 min Lustre load + ~10-15 min CUDAGraph compile
 WAITED=0
-until curl -sf "${VLLM_URL%/v1}/health" > /dev/null 2>&1; do
-    # Detect if vLLM crashed so we don't wait the full 900s
+_VLLM_LOG="${LOG_DIR}/vllm_${SLURM_JOB_ID:-local}.log"
+# Use log-based detection: /health can return 500 due to prometheus middleware
+# bugs even when the model is loaded and inference is ready.
+until grep -q "Application startup complete" "${_VLLM_LOG}" 2>/dev/null; do
     if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
         echo "ERROR: vLLM process (PID ${VLLM_PID}) died during startup after ${WAITED}s"
         echo "Last vLLM log lines:"
-        tail -30 "${LOG_DIR}/vllm_${SLURM_JOB_ID:-local}.log" >&2
+        tail -30 "${_VLLM_LOG}" >&2
         exit 1
     fi
     sleep 5
@@ -438,7 +440,7 @@ until curl -sf "${VLLM_URL%/v1}/health" > /dev/null 2>&1; do
     if [ "${WAITED}" -ge "${MAX_WAIT}" ]; then
         echo "ERROR: vLLM did not come up after ${MAX_WAIT}s"
         echo "Last vLLM log lines:"
-        tail -30 "${LOG_DIR}/vllm_${SLURM_JOB_ID:-local}.log" >&2
+        tail -30 "${_VLLM_LOG}" >&2
         exit 1
     fi
 done
