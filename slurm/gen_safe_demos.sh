@@ -134,6 +134,7 @@ mkdir -p "${LOG_DIR}" "${OUTPUT_DIR}" "${HF_CACHE}"
 
 export HF_HOME="${HF_CACHE}"
 export TRANSFORMERS_CACHE="${HF_CACHE}"
+export PLAYWRIGHT_BROWSERS_PATH="${_SCRATCH}/playwright-browsers"
 
 # Load cluster modules if available (no-op outside SLURM)
 module load gcc python/3.12 arrow/23.0.1 cuda/12.9 cudnn apptainer/1.4.5 2>/dev/null || true
