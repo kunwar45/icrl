@@ -423,7 +423,7 @@ trap 'echo "[$(date +%H:%M:%S)] Caught signal — killing vLLM ${VLLM_PID}"; kil
 # ── Wait for vLLM health ──────────────────────────────────────────────────────
 
 echo "[$(date +%H:%M:%S)] Waiting for vLLM /health ..."
-MAX_WAIT=900  # Qwen-72B needs ~170s to read from Lustre + shard loading time
+MAX_WAIT=2400  # Qwen-72B: ~10-20 min Lustre load + ~10-15 min CUDAGraph compile
 WAITED=0
 until curl -sf "${VLLM_URL%/v1}/health" > /dev/null 2>&1; do
     # Detect if vLLM crashed so we don't wait the full 900s
