@@ -203,11 +203,12 @@ What is your next action?"""
 
 
 def _llm_action(client, model: str, obs: dict, action_set_desc: str,
-                policies_block: str, hint: Optional[str] = None) -> tuple[str, Optional[str]]:
+                policies_block: str, hint: Optional[str] = None,
+                temperature: float = 0.0) -> tuple[str, Optional[str]]:
     """Call LLM and return (raw_output, parsed_action)."""
     messages = _build_messages(obs, action_set_desc, policies_block, hint)
     response = client.chat.completions.create(
-        model=model, messages=messages, max_tokens=512, temperature=0.0,
+        model=model, messages=messages, max_tokens=512, temperature=temperature,
     )
     raw = response.choices[0].message.content.strip()
     return raw, _extract_action(raw)
@@ -221,6 +222,7 @@ def run_episode(
     client,
     action_set,
     max_steps: int = DEFAULT_MAX_STEPS,
+    temperature: float = 0.0,
     verbose: bool = True,
 ) -> dict:
     """
@@ -229,7 +231,7 @@ def run_episode(
     Robustness features:
     - Strips keyword args from actions (prevents NamedArgument JSON crash)
     - Blocks duplicate send_msg_to_user, force-noops if re-gen still gives one
-    - Loop detection: same action 3× in a row → inject hint to try differently
+    - Loop detection: same action repeated → hint, then hard-block + force regen
     - Stagnation detection: same URL 5 steps in a row → inject navigation hint
     - Wraps env.step() to catch/log step-level errors without crashing the episode
     """
@@ -313,7 +315,8 @@ def run_episode(
                 )
 
             # LLM call
-            _, action = _llm_action(client, model, obs, action_set_desc, policies_block, hint)
+            _, action = _llm_action(client, model, obs, action_set_desc, policies_block,
+                                     hint, temperature=temperature)
 
             if action is None:
                 parse_failures += 1
@@ -329,12 +332,28 @@ def run_episode(
                     client, model, obs, action_set_desc, policies_block,
                     hint="CRITICAL: Do NOT call send_msg_to_user() again. "
                          "You already notified the user. Output a task action now "
-                         "(click, fill, goto, answer, etc.)."
+                         "(click, fill, goto, answer, etc.).",
+                    temperature=max(temperature, 0.4),
                 )
                 if regen and "send_msg_to_user" not in regen:
                     action = regen
                 else:
                     action = "noop()"
+
+            # Hard-block a 3rd consecutive repeat: the soft hint at 3x (above) is
+            # advisory only and the model routinely ignores it (observed clicking
+            # the same dead bid 4+ times). Force a regen that must differ, then
+            # fall back to noop() rather than let the identical action repeat.
+            if action == last_action and action_repeat_count >= 2:
+                _, regen = _llm_action(
+                    client, model, obs, action_set_desc, policies_block,
+                    hint=f"CRITICAL: '{last_action}' has had no effect for "
+                         f"{action_repeat_count + 1} consecutive steps. You MUST NOT output "
+                         "that exact action again. Pick a different element from the current "
+                         "Accessibility Tree, or use goto()/go_back().",
+                    temperature=max(temperature, 0.4),
+                )
+                action = regen if (regen and regen != last_action) else "noop()"
 
             # Action loop detection
             if action == last_action:
@@ -444,10 +463,13 @@ def run_episode(
 
 # ── Save trajectory ───────────────────────────────────────────────────────────
 
-def save_trajectory(result: dict, task_id: int, trace_n: int, output_dir: Path) -> Path:
-    """Save a CuP=1 result as task_{id}_trace_{n}.json."""
+def save_trajectory(result: dict, task_id: int, trace_n: int, output_dir: Path,
+                     failed: bool = False) -> Path:
+    """Save a CuP=1 result as task_{id}_trace_{n}.json (or under failed/ for diagnostics)."""
+    output_dir = output_dir / "failed" if failed else output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
-    fname = output_dir / f"task_{task_id}_trace_{trace_n}.json"
+    suffix = f"attempt_{trace_n}" if failed else f"trace_{trace_n}"
+    fname = output_dir / f"task_{task_id}_{suffix}.json"
 
     payload = {
         "task_id": task_id,
@@ -498,6 +520,7 @@ def run_generation(
     log_path: Path,
     client,
     verbose: bool = True,
+    save_failed: bool = False,
 ) -> list[dict]:
     """
     For each task, retry up to max_retries times until CuP=1.
@@ -548,7 +571,12 @@ def run_generation(
 
             for attempt in range(max_retries):
                 attempts += 1
-                print(f"  Attempt {attempt + 1}/{max_retries}")
+                # temperature=0.0 on attempt 0 gives the model's best deterministic shot;
+                # later attempts need to diverge from that greedy path or every retry just
+                # replays the same failure (this was silently true for every prior run —
+                # all calls used temperature=0.0 regardless of attempt).
+                temperature = 0.0 if attempt == 0 else min(0.2 + 0.15 * attempt, 0.8)
+                print(f"  Attempt {attempt + 1}/{max_retries} (temperature={temperature:.2f})")
 
                 result = run_episode(
                     task_id=task_id,
@@ -556,6 +584,7 @@ def run_generation(
                     client=client,
                     action_set=action_set,
                     max_steps=max_steps,
+                    temperature=temperature,
                     verbose=verbose,
                 )
 
@@ -589,6 +618,9 @@ def run_generation(
                     print(f"  ✓ Saved: {path}")
                     cup_found = True
                     break
+                elif save_failed:
+                    path = save_trajectory(result, task_id, attempt, output_dir, failed=True)
+                    print(f"  ✗ Saved failed attempt for inspection: {path}")
 
             if not cup_found:
                 logger.warning("Task %s: no CuP=1 in %d attempts — flagged", task_id, max_retries)
@@ -772,6 +804,8 @@ Backends:
                         help="Validate env + imports without LLM or browser calls")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress per-step action prints")
+    parser.add_argument("--save-failed", action="store_true",
+                        help="Also save non-CuP=1 attempts to <output-dir>/failed/ for diagnosis")
     args = parser.parse_args()
 
     task_ids = args.task_ids or EASY_TASK_IDS
@@ -802,6 +836,7 @@ Backends:
         log_path=log_path,
         client=client,
         verbose=not args.quiet,
+        save_failed=args.save_failed,
     )
 
     csv_path = write_summary_csv(rows, args.output_dir)
