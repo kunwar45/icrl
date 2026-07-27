@@ -67,6 +67,65 @@ export HF_HOME="${HF_HOME:-${SCRATCH}/hf_cache}"
 # already be in HF_HOME (scripts/prefetch_models.py) or the job dies mid-run.
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 
+# ── Partition ─────────────────────────────────────────────────────────────────
+# Some clusters (Killarney) bin GPU partitions by maximum walltime —
+# gpubase_l40s_b1 is 3h, _b2 12h, _b3 24h … — and there is no default that fits
+# every duration, so a job with a mismatched --time is simply rejected. Ask
+# Slurm which partitions exist, keep the ones offering the requested GPU type,
+# and take the shortest bin that still fits the walltime (shortest = least
+# contended). Clusters with a single GPU partition fall through untouched.
+
+slurm_time_to_minutes() {
+    local t="$1" d=0 h=0 m=0 s=0
+    case "$t" in
+        infinite|UNLIMITED|"") echo 99999999; return ;;
+    esac
+    case "$t" in *-*) d="${t%%-*}"; t="${t#*-}" ;; esac
+    local IFS=:
+    # shellcheck disable=SC2086
+    set -- $t
+    case $# in
+        3) h=$1; m=$2; s=$3 ;;
+        2) m=$1; s=$2 ;;
+        1) m=$1 ;;
+    esac
+    echo $(( 10#${d:-0} * 1440 + 10#${h:-0} * 60 + 10#${m:-0} + (10#${s:-0} > 0 ? 1 : 0) ))
+}
+
+pick_partition() {
+    local gtype="${1%%:*}" want want_min best best_min limit gres part
+    command -v sinfo >/dev/null 2>&1 || return 0
+    want_min=$(slurm_time_to_minutes "${TIME}")
+    best=""; best_min=99999999
+
+    while IFS='|' read -r part limit gres; do
+        part="${part%\*}"                       # sinfo marks the default with *
+        [ -n "${part}" ] || continue
+        case "${gres}" in *gpu:${gtype}*) ;; *) continue ;; esac
+        # Interactive/debug partitions are reserved for salloc and reject or
+        # heavily restrict batch work — they tie with the short batch bin on
+        # walltime, so exclude them explicitly rather than by ordering luck.
+        case "${part}" in
+            *interac*|*interactive*|*debug*|*test*) continue ;;
+        esac
+        local pmin
+        pmin=$(slurm_time_to_minutes "${limit}")
+        if [ "${pmin}" -ge "${want_min}" ] && [ "${pmin}" -lt "${best_min}" ]; then
+            best="${part}"; best_min="${pmin}"
+        fi
+    done < <(sinfo -h -o "%P|%l|%G" 2>/dev/null | sort -u)
+
+    [ -n "${best}" ] && echo "${best}"
+}
+
+if [ -z "${ICRL_PARTITION:-}" ] && [ -n "${GPU}" ] && [ "${GPU}" != "0" ]; then
+    AUTO_PART=$(pick_partition "${GPU}")
+    if [ -n "${AUTO_PART}" ]; then
+        ICRL_PARTITION="${AUTO_PART}"
+        echo "auto-selected partition ${ICRL_PARTITION} for ${GPU} @ ${TIME}"
+    fi
+fi
+
 SBATCH_ARGS=(
     --account="${ICRL_ACCOUNT}"
     --time="${TIME}"

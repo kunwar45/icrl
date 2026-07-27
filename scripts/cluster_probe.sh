@@ -96,13 +96,23 @@ hdr "Suggested settings"
 acct=$( { sshare -U -u "$USER" --format=Account -P 2>/dev/null | awk -F'|' 'NR>1 && $1 !~ /^root/ {print $1}' \
           || sacctmgr -nP show assoc user="$USER" format=Account 2>/dev/null; } \
         | sort -u | grep -E '^(aip|def|rrg)-' | head -1)
-gputype=$(sinfo -h -o "%G" 2>/dev/null | tr ',' '\n' | grep -oE 'gpu:[a-z0-9_]+' \
-          | sed 's/gpu://' | sort -u | grep -vE '^[0-9]+$' | head -1)
+# Prefer the GPU type with the most nodes: queue time dominates, and the biggest
+# card is usually the scarcest. Anything in this pipeline fits a 48GB card.
+gputype=$(sinfo -h -o "%G|%D" 2>/dev/null \
+          | awk -F'|' '{n=$2; while (match($1, /gpu:[a-z0-9_]+/)) {
+                          t=substr($1, RSTART+4, RLENGTH-4); tot[t]+=n;
+                          $1=substr($1, RSTART+RLENGTH) } }
+                       END { for (t in tot) if (t !~ /^[0-9]+$/) print tot[t], t }' \
+          | sort -rn | head -1 | awk '{print $2}')
 out "  export ICRL_ACCOUNT=${acct:-<pick from the account list above>}"
 out "  export ICRL_GPU=${gputype:-<pick from the GPU types above>}:1"
-out "  export SCRATCH=\${SCRATCH:-/scratch/\$USER}"
+[ -n "${gputype}" ] && out "     (most available type — swap for another if you need more VRAM)"
+out "  export SCRATCH=${SCRATCH:-/scratch/\$USER}"
 out ""
-out "Then: bash scripts/submit_experiment.sh --stages preflight,splits,encode,constraint,gate"
+out "submit_experiment.sh picks the partition automatically from the GPU type"
+out "and --time, so you only set ICRL_PARTITION to override it."
+out ""
+out "Then: bash scripts/submit_experiment.sh --stages preflight,splits,encode,constraint,gate,plots"
 out "============================================================"
 }
 

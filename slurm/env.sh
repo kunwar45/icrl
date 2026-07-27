@@ -23,11 +23,23 @@ icrl_load_module() {
     return 0
 }
 
+# A venv's bin/python is a symlink into the interpreter that built it, so
+# loading a *different* python module leaves it dangling. pyvenv.cfg records the
+# exact version in plain text and stays readable even when that interpreter is
+# not on PATH — read it and ask for that module first. Clusters name modules by
+# full version (python/3.12.4); Lmod does not prefix-match "python/3.12".
+ICRL_VENV_PY=""
+if [ -f "${ICRL_VENV}/pyvenv.cfg" ]; then
+    ICRL_VENV_PY=$(awk -F'=' '/^[[:space:]]*version[[:space:]]*=/ {gsub(/[[:space:]]/,"",$2); print $2; exit}' \
+                   "${ICRL_VENV}/pyvenv.cfg")
+fi
+
 if command -v module >/dev/null 2>&1; then
     echo "Loading modules:"
     icrl_load_module StdEnv/2023 StdEnv/2020
     icrl_load_module gcc
-    icrl_load_module python/3.12 python/3.11 python
+    icrl_load_module ${ICRL_VENV_PY:+"python/${ICRL_VENV_PY}" "python/${ICRL_VENV_PY%.*}"} \
+                     python/3.12.4 python/3.12 python/3.11.5 python/3.11 python
     icrl_load_module cuda/12.6 cuda/12.9 cuda/12.2 cuda
     icrl_load_module arrow
     icrl_load_module apptainer/1.4.5 apptainer/1.3.5 apptainer
@@ -70,3 +82,11 @@ export HF_HOME="${HF_HOME:-${SCRATCH}/hf_cache}"
 
 echo "venv    : ${ICRL_VENV}"
 echo "python  : $(command -v python) ($(python -V 2>&1))"
+
+# A venv whose interpreter vanished reports nothing useful later on; catch it here.
+if ! python -c "import sys" >/dev/null 2>&1; then
+    echo "ERROR: the venv's python does not run — the module that built it" >&2
+    echo "       (python/${ICRL_VENV_PY:-unknown}) is probably not loaded." >&2
+    echo "       Check: module avail python" >&2
+    return 1 2>/dev/null || exit 1
+fi
