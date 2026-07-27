@@ -288,6 +288,9 @@ def main() -> int:
     ap.add_argument("--require-gpu", action="store_true")
     ap.add_argument("--skip-models", action="store_true",
                     help="skip HuggingFace config lookups (offline nodes)")
+    ap.add_argument("--skip-browser", action="store_true",
+                    help="skip Playwright and SuiteCRM checks — for runs whose "
+                         "stages never open a browser (constraint training, gate)")
     args = ap.parse_args()
 
     print(f"\n=== preflight (backend={args.backend}) ===\n")
@@ -309,10 +312,13 @@ def main() -> int:
 
     if args.backend == "stwebagent":
         print("\n[ benchmark ]")
-        check_benchmark_env_vars()
-        check_benchmark([str(t) for t in args.task_ids])
-        check_playwright()
-        check_suitecrm()
+        if args.skip_browser:
+            print("  (browser + CRM checks skipped — no rollout stage selected)")
+        else:
+            check_benchmark_env_vars()
+            check_benchmark([str(t) for t in args.task_ids])
+            check_playwright()
+            check_suitecrm()
 
     n_fail = sum(1 for s, _, _ in _results if s == FAIL)
     n_warn = sum(1 for s, _, _ in _results if s == WARN)

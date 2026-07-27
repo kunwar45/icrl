@@ -246,14 +246,24 @@ def hydra_cmd(script: str, overrides: list[str]) -> list[str]:
 
 # ── Stages ────────────────────────────────────────────────────────────────────
 
+# Stages that actually drive a browser; only these need Playwright + a live CRM.
+ROLLOUT_STAGES = {"eval_base", "finetune", "eval_tuned"}
+
+
 def stage_preflight(args, profile, results):
     """Fail in seconds on a broken environment rather than hours into the run."""
+    # Checking for SuiteCRM when the run is only training C_theta would block a
+    # perfectly valid CPU/GPU-only job on a browser it never opens.
+    needs_browser = bool(ROLLOUT_STAGES & set(args.selected_stages))
+
     cmd = [python_bin(), "scripts/preflight.py",
            "--backend", profile["env_backend"],
            "--encoder-model", profile["encoder_model"],
            "--policy-model", profile["policy_model"],
            "--demos", args.safe_demos, args.unsafe_demos,
            "--task-ids", *profile["train_task_ids"], *profile["eval_task_ids"]]
+    if not needs_browser:
+        cmd.append("--skip-browser")
     if profile["env_backend"] == "stwebagent":
         cmd.append("--require-gpu")
     code, elapsed = run_cmd(cmd, dry_run=args.dry_run, allow_fail=True)
@@ -607,6 +617,7 @@ def main() -> int:
         args.data_root, "embeddings", args.run_name)
 
     stages = [s.strip() for s in args.stages.split(",") if s.strip()]
+    args.selected_stages = stages
     unknown = [s for s in stages if s not in STAGE_FNS]
     if unknown:
         print(f"Unknown stage(s): {unknown}. Valid: {STAGES}", file=sys.stderr)
