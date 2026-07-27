@@ -79,6 +79,43 @@ def obs_repr(obs: dict) -> str:
     )
 
 
+# ── Action set ────────────────────────────────────────────────────────────────
+
+# MUST stay at module level. BrowserGym builds the executable action code with
+# inspect.getsource(), so a custom action nested inside a factory function is
+# emitted still indented; the generated module then fails to define it and every
+# call dies with `NameError: name 'answer' is not defined` at the exact moment
+# the agent tries to finish the task.
+def answer(message):
+    """
+    When the task is done, call this function with a summary.
+
+    Examples:
+        answer("I finished the task.")
+        answer("I finished the task, the answer is 'value'")
+    """
+    pass  # execution handled by action_mapping
+
+
+def build_action_set(multiaction: bool = False):
+    """
+    The benchmark action set used for rollouts: bid/chat/nav plus the custom
+    `answer()` the agent calls to finish a task.
+
+    browsergym is imported lazily so modules that only touch the mock
+    environment never pull it in.
+    """
+    from browsergym.core.action.highlevel import HighLevelActionSet
+
+    return HighLevelActionSet(
+        custom_actions=[answer],
+        subsets=["bid", "chat", "nav", "custom"],
+        strict=False,
+        multiaction=multiaction,
+        demo_mode="off",
+    )
+
+
 # ── Task dict normalization ───────────────────────────────────────────────────
 
 def _normalize_task_dict(raw: dict, filename_stem: str = "") -> Optional[dict]:
@@ -122,30 +159,35 @@ class STWebAgentBench:
 
     def load_tasks(self) -> Dict:
         """
-        Load task definitions using a three-tier fallback:
+        Load task definitions using a four-tier fallback, most explicit first:
           Tier 1: tasks already injected via inject_task_id_map() — instant return
-          Tier 2: scan benchmark_root/tasks/*.json
-          Tier 3: enumerate the BrowserGym gymnasium registry
+          Tier 2: benchmark_root/tasks/*.json, when a root was given
+          Tier 3: the installed benchmark package's test.raw.json
+          Tier 4: enumerate the BrowserGym gymnasium registry
+
+        An explicit benchmark_root outranks the installed package: passing a
+        root and silently getting the package's 374 tasks instead is the kind of
+        thing you only notice after the numbers look wrong.
         """
         # Tier 1: already populated (e.g. by inject_task_id_map or a prior call)
         if self._tasks is not None:
             return self._tasks
 
-        # Tier 2a: benchmark package test.raw.json (the real task file)
-        tasks = self._load_from_package_json()
-        if tasks:
-            logger.info(f"Loaded {len(tasks)} tasks from benchmark package")
-            self._tasks = tasks
-            return tasks
-
-        # Tier 2b: JSON directory under benchmark_root
-        task_dir = os.path.join(self.root, "tasks")
-        if os.path.isdir(task_dir):
+        # Tier 2: JSON directory under an explicitly supplied benchmark_root
+        task_dir = os.path.join(self.root, "tasks") if self.root else ""
+        if task_dir and os.path.isdir(task_dir):
             tasks = self._load_from_json_dir(task_dir)
             if tasks:
                 logger.info(f"Loaded {len(tasks)} tasks from {task_dir}")
                 self._tasks = tasks
                 return tasks
+
+        # Tier 3: benchmark package test.raw.json (the real task file)
+        tasks = self._load_from_package_json()
+        if tasks:
+            logger.info(f"Loaded {len(tasks)} tasks from benchmark package")
+            self._tasks = tasks
+            return tasks
 
         # Tier 3: BrowserGym registry (task_type will be 'unknown')
         tasks = self._load_from_registry()
@@ -189,7 +231,9 @@ class STWebAgentBench:
     def _load_from_registry(self) -> Dict:
         try:
             import gymnasium
-            import browsergym  # noqa: registers envs
+            # Importing `browsergym` alone registers nothing — the
+            # STWebAgentBenchEnv.* ids come from this submodule.
+            import browsergym.stwebagentbench  # noqa: F401  registers envs
         except ImportError:
             logger.warning("BrowserGym not installed — cannot discover tasks from registry.")
             return {}
@@ -237,20 +281,34 @@ class STWebAgentBench:
 
     # ── Environment factory ───────────────────────────────────────────────────
 
-    def env_for_task(self, task_id: str, headless: bool = True):
+    def env_for_task(self, task_id: str, headless: bool = True, action_set=None):
         """
         Return a raw BrowserGym gymnasium environment for task_id.
         Caller is responsible for reset(), step(), and close().
+
+        Args:
+            action_set: a HighLevelActionSet whose to_python_code becomes the
+                        env's action_mapping. Defaults to build_action_set() —
+                        the set that includes the custom `answer()` action.
+                        BrowserEnv otherwise falls back to a bare
+                        HighLevelActionSet(), where `answer(...)` is undefined
+                        and every episode fails at the moment the agent tries to
+                        finish.
         """
         try:
             import gymnasium
-            import browsergym  # noqa: registers envs
+            # Importing `browsergym` alone registers nothing — the
+            # STWebAgentBenchEnv.* ids come from this submodule.
+            import browsergym.stwebagentbench  # noqa: F401  registers envs
         except ImportError as e:
             raise ImportError(
                 "BrowserGym is required for demo collection. "
                 "Install: pip install -e BrowserGym/browsergym-core "
                 "         pip install -e BrowserGym/stwebagentbench"
             ) from e
+
+        if action_set is None:
+            action_set = build_action_set()
 
         env_id = _ENV_ID_TEMPLATE.format(task_id=task_id)
         # --no-sandbox and --disable-dev-shm-usage are required on SLURM compute
@@ -259,6 +317,7 @@ class STWebAgentBench:
         return gymnasium.make(
             env_id,
             headless=headless,
+            action_mapping=action_set.to_python_code,
             pw_extra_args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",

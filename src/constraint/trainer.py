@@ -137,6 +137,8 @@ class ICRLTrainer:
         eval_every: int = 10,
         log_dir: str = "logs/icrl",
         run_name: str = "icrl",
+        expert_embeddings: Optional[torch.Tensor] = None,
+        policy_embeddings: Optional[torch.Tensor] = None,
     ):
         if policy_trajs is None and rollout_fn is None:
             raise ValueError("Provide either policy_trajs (offline) or rollout_fn (online).")
@@ -155,7 +157,31 @@ class ICRLTrainer:
         self.policy_buffer_size = policy_buffer_size
         self.eval_every         = eval_every
         self.evaluator          = ConstraintEvaluator(ctheta)
-        self.metrics_logger     = MetricsLogger(log_dir, run_name)
+        # Suffixed so the constraint and fine-tuning stages do not append to one
+        # file: their step counters both start at 1, and interleaved rows make
+        # every time series unplottable.
+        self.metrics_logger     = MetricsLogger(log_dir, f"{run_name}_constraint")
+
+        # Pre-computed backbone outputs (scripts/encode_trajectories.py). When
+        # supplied, train() skips backbone inference entirely — the backbone is
+        # frozen so the embeddings are identical either way.
+        self.expert_embeddings = self._to_head_device(expert_embeddings)
+        self.policy_embeddings = self._to_head_device(policy_embeddings)
+
+        if self.expert_embeddings is not None and \
+                self.expert_embeddings.size(0) != len(expert_trajs):
+            raise ValueError(
+                f"expert_embeddings has {self.expert_embeddings.size(0)} rows but "
+                f"{len(expert_trajs)} expert trajectories were passed — the cached "
+                f"bundle was built from a different demo file."
+            )
+        if self.policy_embeddings is not None and \
+                self.policy_embeddings.size(0) != len(self.policy_pool):
+            raise ValueError(
+                f"policy_embeddings has {self.policy_embeddings.size(0)} rows but "
+                f"{len(self.policy_pool)} policy trajectories were passed — the cached "
+                f"bundle was built from a different demo file."
+            )
 
         logger.info(
             f"ICRLTrainer ready  "
@@ -165,28 +191,44 @@ class ICRLTrainer:
             f"β={beta}  λ_c={lambda_c}"
         )
 
-    def train(self, n_iterations: int) -> TrajectoryEncoder:
-        # ── Pre-compute expert embeddings once (backbone is frozen) ───────────
-        logger.info(f"Pre-computing expert embeddings ({len(self.expert_trajs)} demos)...")
-        expert_embs = self.ctheta.embed_texts(
-            [t.to_text() for t in self.expert_trajs]
-        )
-        logger.info(f"Expert embeddings ready: {tuple(expert_embs.shape)}")
+    def _to_head_device(self, t: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+        """Cached bundles are saved on CPU; the head may live on CUDA/MPS."""
+        if t is None:
+            return None
+        device = next(self.ctheta.head.parameters()).device
+        return t.to(device=device, dtype=torch.float32)
 
-        # ── Pre-compute offline policy embeddings (if provided) ───────────────
+    def train(self, n_iterations: int) -> TrajectoryEncoder:
+        # ── Expert embeddings: reuse cache, else run the frozen backbone once ──
+        if self.expert_embeddings is not None:
+            expert_embs = self.expert_embeddings
+            logger.info(f"Using cached expert embeddings: {tuple(expert_embs.shape)}")
+        else:
+            logger.info(f"Pre-computing expert embeddings ({len(self.expert_trajs)} demos)...")
+            expert_embs = self._to_head_device(self.ctheta.embed_texts(
+                [t.to_text() for t in self.expert_trajs]
+            ))
+            logger.info(f"Expert embeddings ready: {tuple(expert_embs.shape)}")
+
+        # ── Offline policy embeddings ─────────────────────────────────────────
         policy_embs: torch.Tensor | None = None
-        if self.policy_pool:
+        if self.policy_embeddings is not None:
+            policy_embs = self.policy_embeddings
+            logger.info(f"Using cached policy embeddings: {tuple(policy_embs.shape)}")
+        elif self.policy_pool:
             logger.info(f"Pre-computing policy embeddings ({len(self.policy_pool)} demos)...")
-            policy_embs = self.ctheta.embed_texts(
+            policy_embs = self._to_head_device(self.ctheta.embed_texts(
                 [t.to_text() for t in self.policy_pool]
-            )
+            ))
             logger.info(f"Policy embeddings ready: {tuple(policy_embs.shape)}")
 
         for iteration in range(1, n_iterations + 1):
             # ── Phase 1: collect fresh rollouts (online mode only) ────────────
             if self.rollout_fn is not None:
                 new_trajs = self.rollout_fn(self.rollouts_per_iter)
-                new_embs  = self.ctheta.embed_texts([t.to_text() for t in new_trajs])
+                new_embs  = self._to_head_device(
+                    self.ctheta.embed_texts([t.to_text() for t in new_trajs])
+                )
                 self.policy_pool.extend(new_trajs)
 
                 policy_embs = new_embs if policy_embs is None else \
@@ -230,7 +272,9 @@ class ICRLTrainer:
 
             # ── Periodic evaluation ───────────────────────────────────────────
             if iteration % self.eval_every == 0:
-                eval_m = self.evaluator.evaluate(self.expert_trajs, self.policy_pool)
+                # Reuse the embeddings we already hold rather than re-running a
+                # frozen multi-billion-parameter backbone every eval_every steps.
+                eval_m = self.evaluator.evaluate_embeddings(expert_embs, policy_embs)
                 logger.info(
                     f"[{iteration:4d}] eval  "
                     f"AUROC={eval_m['auroc']:.3f}  "

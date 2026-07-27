@@ -21,66 +21,26 @@ from browsergym.core.action.highlevel import HighLevelActionSet
 from browsergym.utils.obs import flatten_axtree_to_str
 from stwebagentbench.policy_context import format_policy_context
 
+from src.data.actions import ACTION_RE, VALID_ACTIONS, extract_action  # noqa: F401
+from src.data.st_webagent import build_action_set
 from src.data.trajectory import Step, Trajectory
 from src.utils.llm_client import make_client, make_vllm_client, QWEN_72B
 
 # ── Action parsing (identical to st_bench_example.py) ─────────────────────────
+# Defined in src/data/actions.py so the fine-tuning and evaluation paths — which
+# must not import browsergym — can share the exact same parser. Re-exported here
+# for the existing callers.
 
-_VALID_ACTIONS = {
-    "click", "fill", "select_option", "hover", "press", "clear",
-    "focus", "dblclick", "scroll", "drag_and_drop", "upload_file",
-    "send_msg_to_user", "report_infeasible",
-    "goto", "go_back", "go_forward",
-    "answer", "noop",
-}
-_ACTION_RE = re.compile(r'\b(' + '|'.join(_VALID_ACTIONS) + r')\s*\(', re.DOTALL)
-
-
-def extract_action(text: str) -> str | None:
-    """Extract an action call from LLM output (matches st_bench_example.py)."""
-    if not text:
-        return None
-    for m in re.findall(r'```(?:\w*\n?)?\s*(.*?)```', text, re.DOTALL):
-        c = m.strip()
-        if c and _ACTION_RE.search(c):
-            return c
-    for m in re.findall(r'`([^`]+)`', text):
-        c = m.strip()
-        if c and _ACTION_RE.search(c):
-            return c
-    m = _ACTION_RE.search(text)
-    if m:
-        start, depth = m.start(), 0
-        for i in range(m.end() - 1, len(text)):
-            if text[i] == '(':
-                depth += 1
-            elif text[i] == ')':
-                depth -= 1
-                if depth == 0:
-                    return text[start:i + 1].strip()
-    return None
+_VALID_ACTIONS = VALID_ACTIONS
+_ACTION_RE = ACTION_RE
 
 
 # ── Action set factory ────────────────────────────────────────────────────────
 
 def make_action_set(multiaction: bool = False) -> HighLevelActionSet:
-    def answer(message):
-        """
-        When the task is done, call this function with a summary.
-
-        Examples:
-            answer("I finished the task.")
-            answer("I finished the task, the answer is 'value'")
-        """
-        pass  # execution handled by action_mapping
-
-    return HighLevelActionSet(
-        custom_actions=[answer],
-        subsets=["bid", "chat", "nav", "custom"],
-        strict=False,
-        multiaction=multiaction,
-        demo_mode="off",
-    )
+    """Single definition lives in src/data/st_webagent.py — see the note there
+    about why `answer` must not be nested inside this function."""
+    return build_action_set(multiaction=multiaction)
 
 
 # ── LLM call ──────────────────────────────────────────────────────────────────

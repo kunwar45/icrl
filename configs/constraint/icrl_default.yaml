@@ -32,3 +32,8 @@ constraint:
   evaluation:
     auroc_gate: 0.75   # minimum AUROC before moving to fine-tuning
     ece_gate: 0.10
+
+  # Trained head checkpoint. Written by train_constraint.py; read by
+  # eval_constraint.py and run_finetune.py. null → default location
+  # <checkpoint_dir>/<run_name>/constraint_head.pt
+  head_path: null

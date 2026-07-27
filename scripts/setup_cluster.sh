@@ -18,7 +18,10 @@ set -euo pipefail
 GITHUB_USER="${GITHUB_USER:-}"
 REPOS_ROOT="${REPOS_ROOT:-$HOME}"
 ICRL_ROOT="${ICRL_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-VENV_PATH="${VENV_PATH:-/scratch/${USER}/venvs/icrl_v4}"
+# Follow $SCRATCH so allocations without a usable /scratch quota work by
+# exporting SCRATCH=/project/<alloc>/$USER — same default as slurm/env.sh.
+SCRATCH="${SCRATCH:-/scratch/${USER}}"
+VENV_PATH="${VENV_PATH:-${SCRATCH}/venvs/icrl_v4}"
 BROWSERGYM_ROOT="${REPOS_ROOT}/BrowserGym"
 STWEB_ROOT="${REPOS_ROOT}/ST-WebAgentBench"
 SKIP_PLAYWRIGHT="${SKIP_PLAYWRIGHT:-0}"
@@ -32,7 +35,11 @@ die() { echo "[setup] ERROR: $*" >&2; exit 1; }
 # ── 1. Cluster modules ────────────────────────────────────────────────────────
 if [ "$SKIP_MODULES" != "1" ]; then
     log "Loading cluster modules..."
-    module load gcc python/3.12 2>/dev/null || module load python/3.12 2>/dev/null || true
+    # One module per call with fallbacks: a combined `module load a b c` fails
+    # entirely when any single version is missing on this cluster.
+    for mod in StdEnv/2023 gcc python/3.12 python/3.11 arrow cuda; do
+        module load "$mod" >/dev/null 2>&1 && log "  loaded $mod"
+    done
 fi
 
 # ── 2. Fork remotes + clone ───────────────────────────────────────────────────

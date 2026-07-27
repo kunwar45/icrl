@@ -1,10 +1,15 @@
-# @package _global_.compute
-backend: local
-num_gpus: 1
-precision: bf16
-dataloader_workers: 2
+# @package _global_
+# NOTE: this must be `_global_`, not `_global_.compute`. With the latter the
+# `paths:` block below lands at `compute.paths` and the overrides are silently
+# ignored — `cfg.paths` keeps the base.yaml values.
+compute:
+  backend: local
+  num_gpus: 1
+  precision: bf16
+  dataloader_workers: 2
 
 paths:
-  data_root: data/icrl
-  checkpoint_dir: checkpoints/
-  log_dir: logs/
+  data_root: data
+  checkpoint_dir: checkpoints
+  log_dir: logs
+  benchmark_root: ${oc.env:STWEBAGENT_ROOT,""}

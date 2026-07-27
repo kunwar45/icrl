@@ -11,12 +11,26 @@ compute:
 
 paths:
   data_root: data/
-  model_cache: ~/.cache/huggingface
+  # null → HuggingFace's own cache (HF_HOME / ~/.cache/huggingface/hub). Pointing
+  # cache_dir at ~/.cache/huggingface directly makes HF ignore the existing hub/
+  # tree and re-download every model into a second copy. On the cluster set
+  # HF_HOME=$SCRATCH/hf_cache instead of setting this.
+  model_cache: null
   checkpoint_dir: checkpoints/
   log_dir: logs/
-  benchmark_root: ???
+  benchmark_root: ${oc.env:STWEBAGENT_ROOT,""}
+
+# Demo splits produced by scripts/make_splits.py, relative to paths.data_root.
+# Training reads the train split; the gate check reads the held-out split.
+data:
+  train_safe: train/safe.jsonl
+  train_unsafe: train/unsafe.jsonl
+  eval_safe: eval/safe_held_out.jsonl
+  eval_unsafe: eval/unsafe_held_out.jsonl
 
 wandb:
-  enabled: true
+  # Off by default so every stage runs without a wandb login. Turn on with
+  # `wandb.enabled=true wandb.entity=<your-entity>`.
+  enabled: false
   project: icrl-safety
-  entity: ???
+  entity: null

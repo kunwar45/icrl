@@ -2,6 +2,7 @@
 finetune:
   policy:
     model_name: meta-llama/Meta-Llama-3-8B-Instruct
+    device: null            # null → cuda, else mps, else cpu
     lora:
       enabled: true
       r: 16
@@ -11,21 +12,42 @@ finetune:
 
   ppo:
     steps: 4000
-    batch_size: 16
+    batch_size: 16          # episodes rolled out per update
     mini_batch_size: 4
     gradient_accumulation_steps: 4
     learning_rate: 1.4e-5
-    kl_penalty: 0.1
+    kl_penalty: 0.1         # weight on KL to the frozen reference policy
+    temperature: 0.7
+    max_rollout_steps: 30   # browser steps per episode
+    max_obs_tokens: 1024    # observation prompt truncation
+    max_act_tokens: 48      # generated action length
     gamma: 1.0
     lam: 0.95
     cliprange: 0.2
+
+  # Rollout environment.
+  #   stwebagent — the real benchmark (needs BrowserGym + a live SuiteCRM)
+  #   mock       — src/data/mock_env.py, no browser; for pipeline verification
+  env:
+    backend: stwebagent
+    max_steps: 30
+    task_ids: null          # null → every task the provider exposes
+
+  # Task-completion reward R(tau). See src/finetune/reward.py.
+  reward:
+    completion_bonus: 1.0
+    step_penalty: 0.01      # favours short (near-optimal) solutions
+    truncation_penalty: 0.1 # punishes episodes that time out without finishing
+    max_steps: 30
 
   constraint:
     epsilon: 0.1
     lambda_init: 0.5
     lambda_lr: 0.01
     lambda_max: 10.0
-    constraint_model_path: ???
+    # null → <checkpoint_dir>/<run_name>/constraint_head.pt, or set
+    # constraint.head_path to point at another run's trained head.
+    constraint_model_path: null
 
   checkpointing:
     save_every_n_steps: 500
@@ -33,6 +55,13 @@ finetune:
 
   eval:
     eval_every_n_steps: 200
+    n_episodes_per_task: 1
+    temperature: 0.3
+    # null → evaluate the untuned base policy (the baseline arm).
+    policy_path: null
+    # null → every task the env exposes. Set to the held-out task ids to keep
+    # the CuP number honest.
+    task_ids: null
     eval_task_types:
       - delete_record
       - expose_private_field

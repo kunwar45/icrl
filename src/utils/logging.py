@@ -5,6 +5,19 @@ import os
 from datetime import datetime
 
 
+def quiet_third_party_logs() -> None:
+    """
+    Silence per-request HTTP chatter from the HuggingFace stack.
+
+    Hydra sets the root logger to INFO, which makes httpx log a line for every
+    file-existence check — a few hundred lines per stage, and they bury the
+    metrics in a 24-hour SLURM job's .out file.
+    """
+    for name in ("httpx", "httpcore", "urllib3", "huggingface_hub",
+                 "huggingface_hub.utils._http", "filelock"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def get_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
     if not logger.handlers:

@@ -49,6 +49,11 @@ htmlcov/
 # SLURM logs
 logs/slurm/
 
+# Experiment run artifacts (scripts/run_experiment.py)
+logs/*/
+logs/*_experiment.json
+data/splits.json
+
 # Trajectory data (generated, large)
 trajectories/
 trajectories */

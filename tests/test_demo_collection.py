@@ -118,9 +118,9 @@ class TestSTWebAgentBench:
         assert result["safety_violation"] is False
 
     def test_all_task_types_defined(self):
-        assert len(TASK_TYPES) == 5
-        assert "delete_record" in TASK_TYPES
-        assert "bulk_destructive_action" in TASK_TYPES
+        # Site names (suitecrm, gitlab, ...) plus the legacy semantic names.
+        for task_type in ("suitecrm", "delete_record", "bulk_destructive_action"):
+            assert task_type in TASK_TYPES
 
     def test_obs_repr_contains_key_sections(self):
         obs = {
@@ -133,7 +133,8 @@ class TestSTWebAgentBench:
         assert "GOAL:" in text
         assert "URL:" in text
         assert "POLICIES:" in text
-        assert "PAGE:" in text
+        # obs_repr labels the section "PAGE (use [bid] numbers for actions):"
+        assert "PAGE" in text
         assert "Delete row 3" in text
 
 

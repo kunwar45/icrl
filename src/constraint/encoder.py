@@ -13,6 +13,7 @@ backbone. On SLURM this maps the model across all visible GPUs automatically.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 
@@ -107,6 +108,67 @@ class TrajectoryEncoder(nn.Module):
     @property
     def hidden_size(self) -> int:
         return self.backbone.config.hidden_size
+
+
+# ── Head checkpoint I/O ───────────────────────────────────────────────────────
+
+def _meta_path(head_path: str) -> str:
+    return os.path.splitext(head_path)[0] + ".meta.json"
+
+
+def save_constraint_head(encoder: TrajectoryEncoder, head_path: str,
+                         model_name: str, max_length: int) -> None:
+    """Save the trained head plus the encoder identity it was trained against."""
+    os.makedirs(os.path.dirname(head_path) or ".", exist_ok=True)
+    torch.save(encoder.head.state_dict(), head_path)
+    with open(_meta_path(head_path), "w") as f:
+        json.dump({
+            "encoder_model": model_name,
+            "hidden_size": encoder.hidden_size,
+            "max_length": max_length,
+        }, f, indent=2)
+
+
+def load_constraint_head(encoder: TrajectoryEncoder, head_path: str,
+                         model_name: str = "") -> None:
+    """
+    Load a trained head into `encoder`, in place.
+
+    A head is tied to the backbone it was trained on — its input width is that
+    backbone's hidden size. Loading one trained on a different encoder raises a
+    bare torch size-mismatch that says nothing about which model to use, so
+    check the sidecar metadata first and say it plainly.
+    """
+    state = torch.load(head_path, map_location="cpu")
+
+    meta = {}
+    if os.path.exists(_meta_path(head_path)):
+        try:
+            with open(_meta_path(head_path)) as f:
+                meta = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            meta = {}
+
+    trained_on = meta.get("encoder_model")
+    if trained_on and model_name and trained_on != model_name:
+        raise ValueError(
+            f"{head_path} was trained with encoder '{trained_on}' but the current "
+            f"config uses '{model_name}'. Re-run scripts/train_constraint.py with "
+            f"constraint.encoder.model_name={trained_on}, or point "
+            f"constraint.head_path at the head trained for '{model_name}'."
+        )
+
+    try:
+        encoder.head.load_state_dict(state)
+    except RuntimeError as e:
+        raise ValueError(
+            f"{head_path} does not fit this encoder "
+            f"(hidden_size={encoder.hidden_size}"
+            + (f", head trained on '{trained_on}'" if trained_on else "")
+            + f"). Original error: {e}"
+        ) from e
+
+    encoder.head.to(next(encoder.backbone.parameters()).device)
 
 
 # ── Factory ───────────────────────────────────────────────────────────────────

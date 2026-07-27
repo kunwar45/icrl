@@ -1,10 +1,15 @@
 # @package _global_
+# Killarney (Alliance / Compute Canada AI cluster).
 # NOTE: must be `_global_`, not `_global_.compute` — see local.yaml.
+#
+# Paths follow $SCRATCH, which submit_experiment.sh and slurm/env.sh both
+# default to /scratch/$USER. On allocations without a usable /scratch quota
+# export SCRATCH=/project/<alloc>/$USER before submitting and everything follows.
 compute:
-  backend: carleton
-  num_gpus: 2
+  backend: killarney
+  num_gpus: 1
   precision: bf16
-  dataloader_workers: 4
+  dataloader_workers: 8
 
 paths:
   data_root: ${oc.env:SCRATCH,/scratch/${oc.env:USER}}/icrl

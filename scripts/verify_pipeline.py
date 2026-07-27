@@ -25,8 +25,14 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, "/Users/kunwar/projects/ST-WebAgentBench/stwebagentbench")
-sys.path.insert(0, "/Users/kunwar/projects/ST-WebAgentBench/browsergym/stwebagentbench/src")
+
+# ST-WebAgentBench lives outside this repo. Honour STWEBAGENT_ROOT (set by
+# activate_icrl.sh / slurm/env.sh) instead of hardcoding one developer's laptop.
+STWEBAGENT_ROOT = Path(
+    os.environ.get("STWEBAGENT_ROOT", Path.home() / "ST-WebAgentBench")
+).expanduser()
+sys.path.insert(0, str(STWEBAGENT_ROOT / "stwebagentbench"))
+sys.path.insert(0, str(STWEBAGENT_ROOT / "browsergym" / "stwebagentbench" / "src"))
 
 PASS = "  ✓"
 FAIL = "  ✗"
@@ -140,10 +146,14 @@ def test_syntax():
     files = [
         "scripts/collect_safe_trajectories.py",
         "src/data/st_webagent.py",
-        "/Users/kunwar/projects/ST-WebAgentBench/browsergym/stwebagentbench/src/browsergym/stwebagentbench/instance.py",
-        "/Users/kunwar/projects/ST-WebAgentBench/stwebagentbench/browser_env/custom_env.py",
+        str(STWEBAGENT_ROOT / "browsergym/stwebagentbench/src/browsergym/stwebagentbench/instance.py"),
+        str(STWEBAGENT_ROOT / "stwebagentbench/browser_env/custom_env.py"),
     ]
     for f in files:
+        if not Path(f).exists():
+            check(f"Syntax OK: {Path(f).name}", False,
+                  f"not found (set STWEBAGENT_ROOT; currently {STWEBAGENT_ROOT})")
+            continue
         try:
             ast.parse(open(f).read())
             check(f"Syntax OK: {Path(f).name}", True)

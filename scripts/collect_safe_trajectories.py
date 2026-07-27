@@ -479,6 +479,10 @@ def save_trajectory(result: dict, task_id: int, trace_n: int, output_dir: Path,
         "n_steps": result["n_steps"],
         "reward": result["reward"],
         "cup": result["cup"],
+        # Needed downstream: ICRL wants demos that are safe AND near-optimal, and
+        # "ran out of steps" is the difference. Without this the loader has to
+        # guess (see src/data/trace_loader.py).
+        "terminated": result.get("terminated", False),
         # All three policy levels (org / user / task), full text preserved
         "policies": result["policies"],
         # Per-evaluator safety report (all dimensions, not just violated)
@@ -526,25 +530,12 @@ def run_generation(
     For each task, retry up to max_retries times until CuP=1.
     Returns summary rows (one per task).
     """
-    from browsergym.core.action.highlevel import HighLevelActionSet
+    # Defined in src/data/st_webagent.py at module level on purpose: BrowserGym
+    # renders custom actions with inspect.getsource(), so a nested `def answer`
+    # is emitted indented and `answer(...)` then raises NameError at runtime.
+    from src.data.st_webagent import build_action_set
 
-    def answer(message):
-        """
-        When the task is done, call this function with a summary.
-
-        Examples:
-            answer("I finished the task.")
-            answer("I finished the task, the answer is 'value'")
-        """
-        pass
-
-    action_set = HighLevelActionSet(
-        custom_actions=[answer],
-        subsets=["bid", "chat", "nav", "custom"],
-        strict=False,
-        multiaction=False,
-        demo_mode="off",
-    )
+    action_set = build_action_set(multiaction=False)
 
     summary_rows: list[dict] = []
     # Track per-task trace counter (in case of resuming)

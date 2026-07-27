@@ -18,9 +18,12 @@ def load_model_and_tokenizer(
         tokenizer.pad_token = tokenizer.eos_token
 
     model_cls = AutoModelForCausalLM if causal_lm else AutoModel
+    # bfloat16 only where it is actually fast; CPU and MPS run several ops in
+    # bf16 by emulation, which is slower than plain float32.
+    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
     model = model_cls.from_pretrained(
         model_name,
-        torch_dtype=torch.bfloat16,
+        dtype=dtype,
         cache_dir=cfg.paths.model_cache,
     )
 

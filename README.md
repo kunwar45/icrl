@@ -6,6 +6,179 @@ This guide covers **everything needed to run the full pipeline on an Alliance / 
 
 ---
 
+## The experiment, end to end
+
+One driver runs every stage:
+
+```bash
+python scripts/run_experiment.py --profile smoke     # minutes, laptop, no GPU
+python scripts/run_experiment.py --profile local     # Qwen-0.5B + mock env
+python scripts/run_experiment.py --profile cluster   # the real thing
+```
+
+| # | Stage | Script | What it produces |
+|---|-------|--------|------------------|
+| # | Stage | Script | What it produces |
+|---|-------|--------|------------------|
+| 0 | `preflight` | `preflight.py` | fails in seconds on a broken environment |
+| 1 | `splits` | `make_splits.py` | `<data>/train/*.jsonl`, `<data>/eval/*_held_out.jsonl` |
+| 2 | `encode` | `encode_trajectories.py` | `<data>/embeddings/<run>/{safe,unsafe}.pt` |
+| 3 | `constraint` | `train_constraint.py` | `<ckpt>/<run>/constraint_head.pt` |
+| 4 | `gate` | `eval_constraint.py` | `<ckpt>/<run>/held_out_metrics.json` (AUROC gate) |
+| 5 | `eval_base` | `eval_finetune.py` | CuP of the **untuned** policy |
+| 6 | `finetune` | `run_finetune.py` | `<ckpt>/<run>/final` (LoRA adapter) |
+| 7 | `eval_tuned` | `eval_finetune.py` | CuP of the **tuned** policy |
+| 8 | `plots` | `make_plots.py` | figures + `report.html` |
+
+Paths come from the compute group (`local` → repo-relative; `carleton` → `$SCRATCH/icrl`), overridable with `--data-root` / `--checkpoint-dir` / `--log-dir`.
+
+The summary at the end reports baseline CuP → tuned CuP. A per-run JSON report lands in `<logs>/<run_name>_experiment.json`.
+
+Useful flags: `--stages constraint,gate` (subset), `--dry-run` (print commands), `--strict-gate` (stop when held-out AUROC misses the threshold — off by default, so the pipeline stays verifiable while the safe demos are still weak), `--override key=value` (extra Hydra override, repeatable), `--pdf` (vector figures for LaTeX), `--plot-theme dark`.
+
+### Figures
+
+The `plots` stage runs last and never fails the job, so a run that died during
+fine-tuning still gets figures for the stages that finished. Everything lands in
+`<logs>/<run_name>/plots/`:
+
+| Figure | Shows |
+|--------|-------|
+| `01_constraint_training` | expert vs policy C_θ over ICRL iterations against β, and held-out AUROC climbing toward the gate |
+| `02_gate_heldout` | held-out score distributions and the ROC behind the gate verdict |
+| `03_finetune_dynamics` | task reward, constraint cost vs the ε budget, λ, and CuP / completion / violation rates |
+| `04_cup_comparison` | baseline vs tuned CuP, completion and violation rate — the headline result |
+| `05_violations_by_category` | which ST-WebAgentBench safety dimensions actually fire |
+| `06_stage_timings` | where the wall-clock went |
+
+`report.html` collects all of it — headline tiles, every figure inlined as
+base64, and the underlying tables — into **one self-contained file**:
+
+```bash
+scp cluster:~/icrl/logs/icrl_cluster/plots/report.html .   # then just open it
+```
+
+Regenerate figures at any time without re-running the experiment:
+
+```bash
+python scripts/make_plots.py --run-name icrl_cluster --pdf
+```
+
+On the cluster: `sbatch slurm/run_experiment.sh` (env vars `PROFILE`, `RUN_NAME`, `STAGES`, `STRICT_GATE`, `EXTRA`).
+
+### Profiles
+
+| Profile | Encoder | Policy | Env | Train / held-out tasks | Purpose |
+|---------|---------|--------|-----|------------------------|---------|
+| `smoke` | `tiny-random-gpt2` | `tiny-random-gpt2` | mock | 4 / 2 | plumbing only — proves the wiring, says nothing about results |
+| `local` | `Qwen2.5-0.5B` | `Qwen2.5-0.5B-Instruct` | mock | 4 / 2 | real weights at laptop scale |
+| `cluster` | `Qwen2.5-1.5B` | `Qwen2.5-7B-Instruct` | ST-WebAgentBench | 235–249 / 250–254 | the experiment |
+
+CuP is always measured on tasks the policy did not train on. The policy is 7B rather than the 72B used for demo collection because it has to fit a LoRA fine-tune plus its rollouts on the job's GPUs.
+
+`mock` is `src/data/mock_env.py`: a deterministic text CRM that emits the same
+`info["safety_report"]` contract as the benchmark, so fine-tuning and CuP
+evaluation run without SuiteCRM, Playwright or a GPU. It is a test fixture, not
+a benchmark — never report numbers from it.
+
+### Choosing the expert demos
+
+`--safe-demos` / `--unsafe-demos` accept **either** a `.jsonl` of trajectories
+**or** a directory of `task_*_trace_*.json` — the format the SLURM collection job
+writes to `$SCRATCH/trajectories/safe`. With neither flag the driver takes
+`data/demos/*.jsonl`, falling back to `$SCRATCH/trajectories/{safe,unsafe}` and
+printing which it chose.
+
+What ICRL treats as near-optimal expert behaviour matters more than any
+hyperparameter here:
+
+| Source | n | Terminate cleanly | Notes |
+|--------|---|-------------------|-------|
+| `data/demos/safe.jsonl` | 81 | 0 | Qwen-72B rollouts; 79/81 have `reward=0.0`. Safe but not near-optimal — half of what ICRL assumes. |
+| `$SCRATCH/trajectories/safe` | 1 | 1 | The CuP=1 trace from job 45204272. Correct shape (confirm → delete, 6 steps), but one task is not a split. |
+| `data/demos/webarena_raw.jsonl` | 177 | 177 | WebArena human traces. Humans finish and stop. |
+
+```bash
+python scripts/run_experiment.py --profile cluster \
+    --safe-demos data/demos/webarena_raw.jsonl
+```
+
+`preflight` reports trajectory count, distinct tasks and clean-termination count
+per source, so this shows up before training rather than after.
+
+### Running without the browser
+
+```bash
+pytest tests/test_pipeline_e2e.py -q
+```
+
+Pins the CuP measurement to scripted policies: confirm-then-delete scores CuP=1,
+delete-immediately scores CuP=0, do-nothing scores CuP=0. Without these, a CuP
+of 0.000 from a weak model is indistinguishable from a broken metric.
+
+The same file also guards the contract against the real benchmark (skipped when
+ST-WebAgentBench is not importable): that `answer()` is emitted at module level,
+that the env is built with an `action_mapping`, that `safety_report` parses in
+both its nested and flattened shapes, and that the collection job's trace format
+loads.
+
+### Cluster runbook
+
+Nothing about the cluster is hardcoded any more — allocation, GPU type and
+partition are discovered, then passed on the `sbatch` command line (`#SBATCH`
+directives are literal text and cannot read environment variables).
+
+```bash
+# 0. Discover what THIS cluster offers — accounts, GPU types, modules, quota
+bash scripts/cluster_probe.sh
+export ICRL_ACCOUNT=aip-...        # from the output
+export ICRL_GPU=l40s:1             # or h100:1 — from the output
+# If your allocation has no usable /scratch:
+#   export SCRATCH=/project/<alloc>/$USER
+
+# 1. One-time setup
+export GITHUB_USER=<you> REPOS_ROOT=$SCRATCH
+bash scripts/setup_cluster.sh
+cp .env.example .env && $EDITOR .env
+
+# 2. Prefetch models — LOGIN NODE ONLY (compute nodes have no internet)
+source scripts/session_start.sh
+python scripts/prefetch_models.py --profile cluster
+
+# 3. Front half: no browser, no CRM, no SuiteCRM needed
+bash scripts/submit_experiment.sh \
+    --stages preflight,splits,encode,constraint,gate,plots
+
+# 4. Full run — needs SuiteCRM up on the login node first
+bash scripts/start_suitecrm_apptainer.sh
+echo "WA_SUITECRM=http://$(hostname):8080/public" >> .env
+bash scripts/submit_experiment.sh
+```
+
+| Variable | Meaning |
+|----------|---------|
+| `ICRL_ACCOUNT` | allocation to charge (**required**) |
+| `ICRL_GPU` | `l40s:1`, `h100:2`, a bare count, or `0` for CPU-only |
+| `ICRL_PARTITION` | only if the cluster needs an explicit one |
+| `ICRL_TIME` / `ICRL_MEM` / `ICRL_CPUS` | defaults `12:00:00` / `64G` / `8` |
+| `PROFILE` / `RUN_NAME` | default `cluster` / `icrl_cluster` |
+
+`DRY_RUN=1 bash scripts/submit_experiment.sh` prints the `sbatch` line without
+submitting.
+
+**Offline compute nodes.** Alliance compute nodes cannot reach the internet, so
+`submit_experiment.sh` exports `HF_HUB_OFFLINE=1` and every model must already
+sit in `$HF_HOME` (`$SCRATCH/hf_cache`). `prefetch_models.py --check` verifies
+this, and preflight fails with the exact prefetch command if a model is missing.
+
+`.env` must set `WA_SUITECRM`, **and also `GITLAB` and `SHOPPING_ADMIN`** —
+ST-WebAgentBench validates every site URL when it loads and refuses to start if
+any is missing, even for SuiteCRM-only tasks. Point them at SuiteCRM if you have
+no other instances; nothing in the easy tier dereferences them. `slurm/env.sh`
+exports `.env` to every stage.
+
+---
+
 ## What runs where
 
 ST-WebAgentBench tasks operate a real CRM web app (SuiteCRM) through Playwright inside SLURM jobs. The LLM actor runs via vLLM on the job's GPUs.
@@ -39,6 +212,19 @@ flowchart LR
 | [ST-WebAgentBench](https://github.com/segev-shlomov/ST-WebAgentBench) | segev-shlomov | Benchmark tasks + evaluators |
 
 We maintain **forks** with small compatibility patches. Never push directly to upstream.
+
+> **A note on `/scratch` vs `/project`:** every path below assumes `/scratch/$USER`. On
+> some Alliance accounts (e.g. `aip-s2ganapa`) there's no usable `/scratch` quota and
+> everything instead lives under `/project/aip-s2ganapa/$USER`. All scripts read the
+> `SCRATCH` env var (defaulting to `/scratch/$USER`), so on those accounts export it
+> before sourcing anything:
+> ```bash
+> export SCRATCH=/project/aip-s2ganapa/$USER
+> export ICRL_ROOT=/project/aip-s2ganapa/$USER/icrl
+> ```
+> Do this once per session (or add to `~/.bashrc`) *before* `source scripts/session_start.sh`
+> — otherwise it looks for the repo/venv at `~/icrl` and `/scratch/$USER/...` and fails with
+> `No such file or directory`.
 
 ---
 
@@ -97,10 +283,15 @@ playwright install chromium
 ### 1c. Activate environment (every session)
 
 ```bash
+# If your account uses /project instead of /scratch, export SCRATCH/ICRL_ROOT first — see note above.
 source /scratch/$USER/venvs/icrl_v4/bin/activate
 source /scratch/$USER/venvs/icrl_v4/bin/activate_icrl.sh
 cd ~/icrl
 ```
+
+Or, simpler, from the repo root: `source scripts/session_start.sh` — it does the module load,
+venv activate, `PYTHONPATH` export, and a SuiteCRM reachability check in one step (respects
+`SCRATCH`/`ICRL_ROOT` overrides from the note above).
 
 `activate_icrl.sh` sets:
 
@@ -442,6 +633,7 @@ scancel JOBID
 | `typing_extensions` import errors | `pip install "typing_extensions>=4.13.0" --force-reinstall --no-deps` |
 | 0 ST-WebAgent tasks registered | Re-run `setup_cluster.sh`; check `stwebagentbench.pth` in site-packages |
 | `ModuleNotFoundError: icrl` | `source activate_icrl.sh` to set `PYTHONPATH` |
+| `~/icrl/scripts/session_start.sh: No such file or directory` | Repo/venv live under `/project/...` on this account, not `~/icrl` and `/scratch/$USER`. `cd` into the actual repo dir and export `SCRATCH`/`ICRL_ROOT` first — see the `/scratch` vs `/project` note near the top. |
 
 ### Logs
 
@@ -540,6 +732,10 @@ pytest tests/ --ignore=tests/test_reasoning_trace.py -q
 ## Quick reference — full cluster bootstrap
 
 ```bash
+# If your account uses /project instead of /scratch (e.g. aip-s2ganapa), do this first:
+# export SCRATCH=/project/aip-s2ganapa/$USER
+# export ICRL_ROOT=/project/aip-s2ganapa/$USER/icrl
+
 # === ONE TIME ===
 git clone git@github.com:YOUR_USER/icrl.git ~/icrl && cd ~/icrl
 export GITHUB_USER=YOUR_USER REPOS_ROOT=$HOME
@@ -555,6 +751,7 @@ bash scripts/start_suitecrm_apptainer.sh   # starts + waits until HTTP 200
 echo "WA_SUITECRM=http://$(hostname):8080/public" >> ~/icrl/.env
 
 # === EVERY SESSION ===
+source scripts/session_start.sh   # or manually:
 source /scratch/$USER/venvs/icrl_v4/bin/activate
 source /scratch/$USER/venvs/icrl_v4/bin/activate_icrl.sh
 cd ~/icrl
