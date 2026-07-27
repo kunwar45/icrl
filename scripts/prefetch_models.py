@@ -50,35 +50,50 @@ def hf_home() -> str:
     return os.path.expanduser("~/.cache/huggingface")
 
 
+# TensorFlow / Flax / duplicate-format artifacts the pipeline never loads. The
+# SAME list must gate the download and the verification: filtering the download
+# but demanding a complete mirror when checking marks every model as missing.
+IGNORE_PATTERNS = ["*.msgpack", "*.h5", "*.ot", "*.pth", "*consolidated*"]
+WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf")
+
+
 def is_cached(model: str) -> bool:
-    """True when the weights resolve with the network switched off."""
-    env_before = os.environ.get("HF_HUB_OFFLINE")
-    os.environ["HF_HUB_OFFLINE"] = "1"
+    """
+    True when the model resolves without touching the network.
+
+    Checks what a job actually does — config, tokenizer, and at least one
+    weights shard on disk — rather than asking for a byte-complete repo mirror.
+    `snapshot_download(local_files_only=True)` without the ignore list raises
+    IncompleteSnapshotError over files we intentionally skipped.
+
+    Uses the per-call `local_files_only` flag rather than setting
+    HF_HUB_OFFLINE: huggingface_hub reads that variable once, at import, into a
+    module-level constant, so flipping it here would put the library in offline
+    mode for the rest of the process — including the downloads this script
+    exists to perform.
+    """
     try:
-        from transformers import AutoConfig
-        AutoConfig.from_pretrained(model)
-        from huggingface_hub import snapshot_download
-        snapshot_download(model, local_files_only=True)
-        return True
+        from transformers import AutoConfig, AutoTokenizer
+        AutoConfig.from_pretrained(model, local_files_only=True)
+        AutoTokenizer.from_pretrained(model, local_files_only=True)
     except Exception:
         return False
-    finally:
-        if env_before is None:
-            os.environ.pop("HF_HUB_OFFLINE", None)
-        else:
-            os.environ["HF_HUB_OFFLINE"] = env_before
+
+    try:
+        from huggingface_hub import snapshot_download
+        path = snapshot_download(model, local_files_only=True,
+                                 ignore_patterns=IGNORE_PATTERNS)
+    except Exception:
+        return False
+
+    return any(p.suffix in WEIGHT_SUFFIXES for p in Path(path).rglob("*") if p.is_file())
 
 
 def fetch(model: str, token: str | None) -> bool:
     from huggingface_hub import snapshot_download
     print(f"  downloading {model} ...", flush=True)
     try:
-        # Skip the duplicate formats — the pipeline loads safetensors.
-        snapshot_download(
-            model,
-            token=token,
-            ignore_patterns=["*.msgpack", "*.h5", "*.ot", "*.pth", "*consolidated*"],
-        )
+        snapshot_download(model, token=token, ignore_patterns=IGNORE_PATTERNS)
         return True
     except Exception as e:
         print(f"  FAILED {model}: {type(e).__name__}: {e}", file=sys.stderr)
@@ -94,6 +109,14 @@ def main() -> int:
     ap.add_argument("--check", action="store_true",
                     help="report cache status without downloading")
     args = ap.parse_args()
+
+    # This script only ever runs where there IS internet, and it must win over a
+    # stale HF_HUB_OFFLINE=1 left in the shell by a previous submit. Set before
+    # any huggingface import, since the library snapshots the value on import.
+    if os.environ.get("HF_HUB_OFFLINE", "") not in ("", "0"):
+        print("note: HF_HUB_OFFLINE was set — clearing it, this step needs the network")
+    os.environ["HF_HUB_OFFLINE"] = "0"
+    os.environ.pop("TRANSFORMERS_OFFLINE", None)
 
     models = list(args.models)
     if args.profile:
