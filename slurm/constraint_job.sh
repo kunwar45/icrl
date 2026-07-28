@@ -10,7 +10,11 @@
 #SBATCH --error=logs/slurm/%x_%j.err
 
 set -euo pipefail
-source "$(dirname "$0")/env.sh"
-cd "${SLURM_SUBMIT_DIR:-$(pwd)}"
+# Slurm copies the batch script into a spool directory before running it, so
+# "$(dirname "$0")" points at /cm/local/.../spool/job<N>/ and not at the repo.
+# SLURM_SUBMIT_DIR is the directory sbatch was invoked from — the repo root.
+ICRL_REPO="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+cd "${ICRL_REPO}"
+source "${ICRL_REPO}/slurm/env.sh"
 
 python scripts/train_constraint.py "$@"

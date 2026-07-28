@@ -96,7 +96,12 @@ mkdir -p "${LOG_DIR}" embeddings "${HF_CACHE}"
 export HF_HOME="${HF_CACHE}"
 export TRANSFORMERS_CACHE="${HF_CACHE}"
 
-source "$(dirname "$0")/env.sh" 2>/dev/null || true
+# Slurm copies the batch script into a spool directory before running it, so
+# "$(dirname "$0")" points at /cm/local/.../spool/job<N>/ and not at the repo.
+# SLURM_SUBMIT_DIR is the directory sbatch was invoked from — the repo root.
+ICRL_REPO="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+cd "${ICRL_REPO}"
+source "${ICRL_REPO}/slurm/env.sh" 2>/dev/null || true
 cd "${SLURM_SUBMIT_DIR:-$(pwd)}"
 
 FLASH_FLAG=""
