@@ -328,7 +328,7 @@ WA_SUITECRM=http://login3:8080/public
 
 > Replace `login3` with the hostname of the login node where SuiteCRM runs (`hostname` on that node).
 
-SLURM jobs load `~/icrl/.env` automatically via `scripts/collect_safe_trajectories.py`. When `WA_SUITECRM` is set, jobs **skip** SuiteCRM startup and connect directly to your login-node instance.
+SLURM jobs load `~/icrl/.env` automatically (`slurm/env.sh` exports it to every stage). With `WA_SUITECRM` set, jobs connect directly to your login-node SuiteCRM instance.
 
 ---
 
@@ -481,11 +481,13 @@ python -c "import browsergym.stwebagentbench, gymnasium as gym; \
 # icrl env wrapper
 python -c "from icrl.envs.stwebagent import STWebAgentEnv; print('OK')"
 
-# No browser or GPU needed
-python scripts/smoke_collection.py
+# No browser or GPU needed — resolved config only
+python scripts/collect_trajectories.py \
+  --config configs/data_collection/stwebagentbench_expert.yaml --dry-run
 
-# Live browser episode (SuiteCRM must be reachable)
-python scripts/run_demo.py --task-id 235 --max-steps 15
+# Live smoke collection (SuiteCRM must be reachable; OpenRouter backend)
+python scripts/collect_trajectories.py \
+  --config configs/data_collection/stwebagentbench_expert.yaml --smoke
 ```
 
 ---
@@ -514,51 +516,35 @@ curl -sf http://login3:8080/public -o /dev/null && echo "CRM OK" || echo "CRM DO
 
 ### 5a. Dry run (no GPU, no browser)
 
-Validates imports, `.env`, and task IDs without starting vLLM or SuiteCRM:
+Validates imports, `.env`, and the resolved config without starting vLLM:
 
 ```bash
-DRY_RUN=1 sbatch --gres= --mem=4G --time=00:05:00 slurm/gen_safe_demos.sh
-tail -f logs/slurm/icrl-gen_*.out
+DRY_RUN=1 CONFIG=configs/data_collection/stwebagentbench_expert.yaml \
+  sbatch --gres= --mem=4G --time=00:10:00 slurm/collect_trajectories_job.sh
+tail -f logs/slurm/icrl-collect-trajectories_*.out
 ```
 
-### 5b. Safe trajectory collection (main job)
+### 5b. Trajectory collection
 
-Starts vLLM with **Qwen2.5-72B** (4× H100, tensor-parallel=4), then collects CuP=1 trajectories for easy-tier SuiteCRM tasks (235–254).
+One wrapper for every collection run — the config defines benchmark, tasks,
+model, prompt, and keep rule (see `docs/data-collection.md`). GPU count on the
+sbatch line must match the config's `model.tensor_parallel`.
 
 ```bash
-# Smoke test: first 2 tasks
-N_TASKS=2 sbatch slurm/gen_safe_demos.sh
-tail -f logs/slurm/icrl-gen_*.out
+# Expert: Qwen-72B + policy prompt, keep only CuP=1 (4× GPU, tensor-parallel=4)
+CONFIG=configs/data_collection/stwebagentbench_expert.yaml \
+  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 slurm/collect_trajectories_job.sh
 
-# All 20 easy tasks
-sbatch slurm/gen_safe_demos.sh
+# Unsafe: Qwen-7B, no safety prompt, keep any violating episode (1× GPU)
+CONFIG=configs/data_collection/stwebagentbench_unsafe.yaml \
+  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:1 slurm/collect_trajectories_job.sh
 
-# Explicit task IDs
-TASK_IDS="235 236 237" sbatch slurm/gen_safe_demos.sh
+# Subset without editing the config:
+OVERRIDES="benchmark.task_ids=[235,236,237]" CONFIG=... sbatch ...
 ```
 
-**Output:** `/scratch/$USER/trajectories/safe/task_*_trace_*.json`
-
-| Env var | Default | Description |
-|---------|---------|-------------|
-| `N_TASKS` | all 20 | Take first N easy-tier tasks |
-| `TASK_IDS` | — | Override with explicit IDs |
-| `MAX_RETRIES` | 5 | Attempts per task before marking failed |
-| `MAX_STEPS` | 30 | Max browser steps per episode |
-| `MODEL` | `Qwen/Qwen2.5-72B-Instruct` | vLLM model |
-| `TP_SIZE` | 4 | Tensor parallel (must match `--gres=gpu:h100:N`) |
-| `OUTPUT_DIR` | `/scratch/$USER/trajectories/safe` | JSON output |
-| `WA_SUITECRM` | from `.env` | If unset, job starts CRM via Apptainer on compute node |
-
-**Resource defaults:** 4× H100, 128 GB RAM, 12 h wall time.
-
-### 5c. Unsafe (adversarial) demo collection
-
-```bash
-sbatch slurm/collect_unsafe_demos.sh
-```
-
-Uses Qwen-7B on 1× H100 without safety prompt (policy violations are the signal).
+**Output:** `$SCRATCH/trajectories/stwebagentbench/{expert,unsafe}/task_*_trace_*.json`
+plus `manifest.json` (resolved config) and `summary.csv` per directory.
 
 ### 5d. Other pipeline jobs
 
@@ -758,6 +744,7 @@ cd ~/icrl
 
 # === RUN COLLECTION ===
 mkdir -p logs/slurm
-N_TASKS=2 sbatch slurm/gen_safe_demos.sh
+OVERRIDES="benchmark.task_ids=[235,236]" CONFIG=configs/data_collection/stwebagentbench_expert.yaml \
+  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 slurm/collect_trajectories_job.sh
 tail -f logs/slurm/icrl-gen_*.out
 ```

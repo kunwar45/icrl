@@ -2,7 +2,7 @@
 """
 Pre-compute and save trajectory embeddings using a frozen Qwen backbone.
 
-Reads trajectory files (task_*_trace_*.json from collect_safe_trajectories.py,
+Reads trajectory files (task_*_trace_*.json from collect_trajectories.py,
 or *.jsonl from data/demos/), encodes each with mean-pooled last hidden states,
 and saves a .pt bundle that the ICRL trainer can load directly without re-running
 the backbone.

@@ -122,7 +122,7 @@ PROFILES: dict[str, dict] = {
         # Any $SCRATCH-based compute group works; killarney and carleton are
         # identical in shape. Override with --compute.
         "compute": "killarney",
-        # Easy-tier SuiteCRM tasks (the IDs gen_safe_demos.sh collects), split so
+        # Easy-tier SuiteCRM tasks (the IDs the collection configs cover), split so
         # the CuP number comes from tasks the policy never trained on.
         "train_task_ids": [str(i) for i in range(235, 250)],
         "eval_task_ids": [str(i) for i in range(250, 255)],
@@ -458,18 +458,18 @@ def resolve_demo_paths(args) -> None:
     """
     Point --safe-demos / --unsafe-demos at whatever actually exists.
 
-    The SLURM collection job writes task_*_trace_*.json to
-    $SCRATCH/trajectories/{safe,unsafe}, while the repo default is a .jsonl under
-    data/demos. Rather than fail on a fresh cluster checkout, fall back to the
-    collection output — and say so, because which demos were used changes the
-    result.
+    The collection pipeline (scripts/collect_trajectories.py) writes
+    task_*_trace_*.json to $SCRATCH/trajectories/<benchmark>/{expert,unsafe},
+    while the repo default is a .jsonl under data/demos. Rather than fail on a
+    fresh cluster checkout, fall back to the collection output — and say so,
+    because which demos were used changes the result.
     """
     scratch = os.environ.get("SCRATCH", f"/scratch/{os.environ.get('USER', '')}")
     for attr, default, fallback in (
         ("safe_demos", "data/demos/safe.jsonl",
-         os.path.join(scratch, "trajectories", "safe")),
+         os.path.join(scratch, "trajectories", "stwebagentbench", "expert")),
         ("unsafe_demos", "data/demos/unsafe.jsonl",
-         os.path.join(scratch, "trajectories", "unsafe")),
+         os.path.join(scratch, "trajectories", "stwebagentbench", "unsafe")),
     ):
         chosen = getattr(args, attr)
         if chosen is not None:

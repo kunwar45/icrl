@@ -6,7 +6,7 @@
 # Loads the frozen Qwen/Qwen2.5-1.5B backbone, mean-pools last hidden states
 # over each trajectory, and saves .pt bundles for the ICRL constraint trainer.
 #
-# Run this AFTER gen_safe_demos.sh has produced trajectory JSON files.
+# Run this AFTER collect_trajectories_job.sh has produced trajectory JSON files.
 # The resulting .pt files are loaded directly by ICRLTrainer — the backbone
 # never needs to run again during training.
 #
@@ -142,7 +142,7 @@ if [ -d "${SAFE_DIR}" ]; then
     echo "[$(date +%H:%M:%S)] Safe embeddings → ${SAFE_OUT}"
 else
     echo "[WARN] ${SAFE_DIR} not found — skipping safe encoding."
-    echo "       Run gen_safe_demos.sh first."
+    echo "       Run collect_trajectories_job.sh first."
 fi
 
 # ── Encode unsafe trajectories ────────────────────────────────────────────────

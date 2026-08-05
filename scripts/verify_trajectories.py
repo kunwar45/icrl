@@ -136,7 +136,7 @@ def main():
     traj_dir = args.traj_dir
     if not traj_dir.exists():
         print(f"Directory not found: {traj_dir}")
-        print("Run collect_safe_trajectories.py first to generate trajectories.")
+        print("Run scripts/collect_trajectories.py first to collect trajectories.")
         sys.exit(1)
 
     trajs = load_trajectories(traj_dir)

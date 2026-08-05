@@ -254,7 +254,7 @@ def test_default_action_set_would_reject_answer():
     # ST-WebAgentBench nests the policy...
     ({"policy": {"policy_category": "user_consent", "source": "user",
                  "description": "confirm first"}, "violated": True}, "user_consent"),
-    # ...while collect_safe_trajectories.py and the mock flatten it.
+    # ...while the collection pipeline and the mock flatten it.
     ({"policy_category": "user_consent", "violated": True}, "user_consent"),
     ({"violated": False}, "unknown"),
 ])

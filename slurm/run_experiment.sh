@@ -12,9 +12,9 @@
 # (figures inlined; scp it off the cluster and open it). The individual PNGs
 # and, with EXTRA="--pdf", vector PDFs sit alongside it.
 #
-# Demos must already exist (slurm/gen_safe_demos.sh, slurm/collect_unsafe_demos.sh).
-# The driver reads either data/demos/*.jsonl or the collection job's
-# $SCRATCH/trajectories/{safe,unsafe} trace directories.
+# Demos must already exist (slurm/collect_trajectories_job.sh — see
+# docs/data-collection.md). The driver reads either data/demos/*.jsonl or the
+# collection output $SCRATCH/trajectories/<benchmark>/{expert,unsafe}.
 #
 # For the `cluster` profile SuiteCRM must be reachable at $WA_SUITECRM, because
 # fine-tuning and CuP evaluation both roll out real browser episodes. The
