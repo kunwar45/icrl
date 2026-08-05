@@ -67,6 +67,13 @@ export HF_HOME="${HF_HOME:-${SCRATCH}/hf_cache}"
 # already be in HF_HOME (scripts/infra/prefetch_models.py) or the job dies mid-run.
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 
+# Same for the demo pool: HF is the canonical data store and data/ only a
+# cache, so pull any missing pool files now, while we still have internet.
+HF_HUB_OFFLINE=0 python -m src.data.hf_demo_pool || {
+    echo "warning: could not sync the demo pool from HF; the job will use" \
+         "whatever is already in data/ (preflight reports missing demos)."
+}
+
 # ── Partition ─────────────────────────────────────────────────────────────────
 # Some clusters (Killarney) bin GPU partitions by maximum walltime —
 # gpubase_l40s_b1 is 3h, _b2 12h, _b3 24h … — and there is no default that fits

@@ -50,7 +50,7 @@ src/                    reusable, human-reviewed code (import as src.*)
 scripts/                pipeline drivers, foldered by stage; a script does no real work —
                         it pipes src/ functions together. Top level ONLY for multi-stage pipers:
   run_experiment.py       THE driver: preflight → splits → encode → constraint → gate →
-                          eval_base → finetune → eval_tuned → plots
+                          eval_base → finetune → eval_tuned → plots → publish (to HF)
   preflight.py            fail-fast environment check (stage 0)
   sweep_finetune_hyperparams.py   multi-seed / multi-epsilon fine-tune sweeps (local or SLURM array)
   make_experiment_plots.py        figures + self-contained report.html from a finished run
@@ -121,8 +121,8 @@ outputs/ checkpoints/ logs/ trajectories/ embeddings/   run artifacts (gitignore
 - `scratch/` scripts say what kind of one-off they are: `verify_*` (contract checks),
   `manual_test_*` (hand-run smoke tests — never `test_*`, which pytest would collect).
 - **Never rename a pipeline stage name** (`preflight, splits, encode, constraint, gate,
-  eval_base, finetune, eval_tuned, plots`) — stage names are the shared vocabulary
-  between `run_experiment.py`, the README tables, and the run reports.
+  eval_base, finetune, eval_tuned, plots, publish`) — stage names are the shared
+  vocabulary between `run_experiment.py`, the README tables, and the run reports.
 
 ## The pipeline (one driver runs every stage)
 
@@ -131,9 +131,9 @@ python scripts/run_experiment.py --profile smoke|local|cluster
 ```
 
 Stages: `preflight, splits, encode, constraint, gate, eval_base, finetune, eval_tuned,
-plots` — subset with `--stages`, inspect with `--dry-run`, extra Hydra overrides with
-`--override key=value`. Per-run report in `<logs>/<run_name>_experiment.json`; figures +
-`report.html` in `<logs>/<run_name>/plots/`. On the cluster:
+plots, publish` — subset with `--stages`, inspect with `--dry-run`, extra Hydra overrides
+with `--override key=value`. Per-run report in `<logs>/<run_name>_experiment.json`; figures
++ `report.html` in `<logs>/<run_name>/plots/`. On the cluster:
 `bash scripts/infra/submit_experiment.sh` (env vars `PROFILE`, `RUN_NAME`, `STAGES`).
 
 - The `mock` env (`src/data/mock_env.py`) is a **test fixture, not a benchmark** — never
@@ -144,6 +144,36 @@ plots` — subset with `--stages`, inspect with `--dry-run`, extra Hydra overrid
   clean-termination rates per source — read them before training, and say so in results
   when the safe demos are weak (most collected safe demos have reward ≈ 0, which is only
   half of what ICRL assumes).
+
+## Datasets, checkpoints and eval results go to Hugging Face
+
+**Any demo set, embedding cache, constraint head, fine-tuned adapter or eval result
+produced by this repository is published to Hugging Face.** The repository holds code
+and configuration; gitignored `data/`, `checkpoints/`, `outputs/` and `logs/` exist for
+fast iteration only — the canonical location for artifacts and results is HF.
+
+- The `publish` stage of `run_experiment.py` does this for a whole run: one dataset repo
+  (demos, splits, embeddings, constraint head + metrics, CuP eval jsons, plots, report)
+  plus one model repo for the LoRA adapter. It runs last by default, is private unless
+  `--hf-public`, and **skips mock-env runs** (test fixtures are not results;
+  `--force-publish` overrides).
+- **Compute nodes are offline**, so inside a SLURM job the stage skips and prints the
+  exact command; rerun from the login node:
+  `python scripts/run_experiment.py --profile cluster --run-name <run> --stages publish`.
+- **Naming: `<YYYY-MM-DD>-<run-name>`** (adapter: `…-policy-lora`), the date the data was
+  *generated*, not uploaded. A reader scanning a repo list must be able to tell what an
+  artifact is and when it came from without opening it.
+- Every upload carries a card (`README.md` in the HF repo) stating at minimum:
+  `experiment`, `date_generated`, `source_repo` (+ commit), `models`, **`demo_source`**
+  (which safe/unsafe demo sets — demo quality *is* the experiment here, so this is the
+  field a future reader needs most), `generation_config`, `schema`, `provenance` (the
+  exact rerun command). The publish stage writes these; when uploading anything by hand,
+  fill them in by hand.
+- Namespace: `HF_ORG` in `.env` (or `--hf-org`), else the token owner's account. The
+  token needs write scope; repos are created automatically — nothing to set up on the
+  website.
+- What stays in git: code, configs, seeds, docs, small tables/figures, and a pointer to
+  the HF repo (record it in `docs/LOG.md`), so the link is never only in someone's memory.
 
 ## Git etiquette
 

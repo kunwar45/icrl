@@ -27,6 +27,7 @@ python scripts/run_experiment.py --profile cluster   # the real thing
 | 6 | `finetune` | `run_finetune.py` | `<ckpt>/<run>/final` (LoRA adapter) |
 | 7 | `eval_tuned` | `eval_finetune.py` | CuP of the **tuned** policy |
 | 8 | `plots` | `make_experiment_plots.py` | figures + `report.html` |
+| 9 | `publish` | (in `run_experiment.py`) | pushes everything to Hugging Face |
 
 Paths come from the compute group (`local` → repo-relative; `carleton` → `$SCRATCH/icrl`), overridable with `--data-root` / `--checkpoint-dir` / `--log-dir`.
 
@@ -63,6 +64,38 @@ python scripts/make_experiment_plots.py --run-name icrl_cluster --pdf
 ```
 
 On the cluster: `sbatch scripts/slurm/run_experiment_job.sh` (env vars `PROFILE`, `RUN_NAME`, `STAGES`, `STRICT_GATE`, `EXTRA`).
+
+### Artifacts live on Hugging Face
+
+The repo holds code and configs; **Hugging Face is the canonical store for
+data** — the gitignored `data/` tree is only a local cache. The demo pool
+(safe/unsafe demos, train/eval splits, task definitions) lives in
+`datasets/icrl-finetuning/2026-06-04-stwebagentbench-suitecrm-demos`
+(override with `HF_DEMO_POOL_REPO` in `.env`), and any missing pool file is
+auto-fetched by `run_experiment.py` via `src/data/hf_demo_pool.py`. Fetch the
+whole pool by hand with `python -m src.data.hf_demo_pool` (needed on the
+cluster login node before offline jobs). Run outputs are likewise
+**published to Hugging Face** by the final `publish` stage. Per run it creates
+(private by default, `--hf-public` for public):
+
+| HF repo | Contents |
+|---------|----------|
+| `datasets/<ns>/<YYYY-MM-DD>-<run-name>` | demos, train/eval splits, embeddings, constraint head + metrics, CuP eval results, plots, `experiment.json` |
+| `models/<ns>/<YYYY-MM-DD>-<run-name>-policy-lora` | the fine-tuned LoRA adapter |
+
+`<ns>` is `HF_ORG` from `.env` (or `--hf-org`), defaulting to the token owner's
+account — this project publishes to the `icrl-finetuning` org
+(https://huggingface.co/icrl-finetuning). The token comes from
+`HUGGINGFACE_TOKEN` in `.env`, falling back to the cached `hf auth login`
+credential; it needs **write** scope *on the org*, and repos are created
+automatically. Each repo carries a card recording the experiment, date
+generated, source commit, models, demo source, config and the exact rerun
+command. Mock-env runs are skipped (test fixtures, not results); compute nodes
+are offline, so after a cluster run publish from the **login node**:
+
+```bash
+python scripts/run_experiment.py --profile cluster --run-name icrl_cluster --stages publish
+```
 
 ### Profiles
 

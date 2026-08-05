@@ -15,6 +15,7 @@ hand:
     6. finetune        scripts/finetune/run_finetune.py       Lagrangian constrained PG
     7. eval_tuned      scripts/finetune/eval_finetune.py      CuP of the tuned policy
     8. plots           scripts/make_experiment_plots.py         figures + one HTML report
+    9. publish         (in-process)                  push artifacts to Hugging Face
 
 Profiles
 --------
@@ -57,7 +58,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 STAGES = ["preflight", "splits", "encode", "constraint", "gate",
-          "eval_base", "finetune", "eval_tuned", "plots"]
+          "eval_base", "finetune", "eval_tuned", "plots", "publish"]
 
 # ── Profiles ──────────────────────────────────────────────────────────────────
 # Each profile supplies Hydra overrides shared by every stage, plus a few
@@ -297,6 +298,15 @@ def stage_encode(args, profile, results):
         return
     emb_dir = Path(args.embeddings_dir)
     total = 0.0
+    if "splits" not in args.selected_stages and not args.dry_run:
+        # Splits were made in an earlier run; the local cache may be gone —
+        # HF is canonical, so pull the published splits rather than failing.
+        try:
+            from src.data.hf_demo_pool import ensure_local
+            ensure_local([os.path.join(args.data_root, "train", f"{l}.jsonl")
+                          for l in ("safe", "unsafe")])
+        except Exception as e:
+            print(f"note: HF pool fetch failed ({e}); relying on local files")
     for label, jsonl in (("safe", os.path.join(args.data_root, "train", "safe.jsonl")),
                          ("unsafe", os.path.join(args.data_root, "train", "unsafe.jsonl"))):
         out = emb_dir / f"{label}.pt"
@@ -400,6 +410,160 @@ def stage_plots(args, profile, results):
                         "seconds": elapsed, "out_dir": out_dir}
 
 
+def stage_publish(args, profile, results):
+    """
+    Persist the run's artifacts to Hugging Face — the canonical home for
+    datasets, checkpoints and eval results (this repo holds code and configs,
+    not bulk data). Two repos per run, named <YYYY-MM-DD>-<run-name> with the
+    date the artifacts were generated:
+
+      datasets/<ns>/<date>-<run-name>              demos, splits, embeddings,
+                                                   constraint head + metrics,
+                                                   CuP eval results, plots, report
+      models/<ns>/<date>-<run-name>-policy-lora    the fine-tuned LoRA adapter
+
+    <ns> is --hf-org / $HF_ORG, else the token owner's namespace. Repos are
+    private unless --hf-public. Never fails the run: on an offline compute node
+    (HF_HUB_OFFLINE=1) or without a token it degrades to a skip that prints the
+    exact command to run from the login node.
+    """
+    import datetime
+    import subprocess as sp
+
+    retry = (f"python scripts/run_experiment.py --profile {args.profile} "
+             f"--run-name {args.run_name} --stages publish")
+
+    if os.environ.get("HF_HUB_OFFLINE") == "1":
+        print(f"publish: HF_HUB_OFFLINE=1 (offline compute node) — skipping.\n"
+              f"         From the login node run: {retry}")
+        results["publish"] = {"status": "skipped", "reason": "offline"}
+        return
+
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(REPO_ROOT / ".env")
+    except ImportError:
+        pass
+    token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
+    if not token or token == "your-key-here":
+        from huggingface_hub import get_token
+        token = get_token()  # cached `hf auth login` credential
+    if not token:
+        print(f"publish: no HUGGINGFACE_TOKEN in .env and no cached `hf auth login` "
+              f"— skipping. Then run: {retry}")
+        results["publish"] = {"status": "skipped", "reason": "no token"}
+        return
+
+    if profile["env_backend"] == "mock" and not args.force_publish:
+        print("publish: mock-env run — a test fixture, not a result. Skipping "
+              "(--force-publish to push anyway, e.g. to test this stage).")
+        results["publish"] = {"status": "skipped", "reason": "mock env"}
+        return
+
+    # Date the artifacts were generated, not the date of the upload.
+    report_path = Path(args.log_dir) / f"{args.run_name}_experiment.json"
+    if report_path.exists():
+        date = datetime.date.fromtimestamp(report_path.stat().st_mtime).isoformat()
+    else:
+        date = datetime.date.today().isoformat()
+    base_name = f"{date}-{args.run_name.replace('_', '-')}"
+
+    ckpt = Path(args.checkpoint_dir) / args.run_name
+    adapter = ckpt / "final"
+    # (local path, path inside the HF repo) — only what the run actually produced.
+    dataset_items = [
+        (Path(args.safe_demos), "demos/safe"),
+        (Path(args.unsafe_demos), "demos/unsafe"),
+        (Path(args.data_root) / "train", "splits/train"),
+        (Path(args.data_root) / "eval", "splits/eval"),
+        (Path(args.data_root) / "splits.json", "splits/splits.json"),
+        (Path(args.embeddings_dir), "embeddings"),
+        (ckpt / "constraint_head.pt", "constraint/constraint_head.pt"),
+        (ckpt / "constraint_head.meta.json", "constraint/constraint_head.meta.json"),
+        (ckpt / "train_metrics.json", "constraint/train_metrics.json"),
+        (ckpt / "held_out_metrics.json", "constraint/held_out_metrics.json"),
+        (Path(args.checkpoint_dir) / f"{args.run_name}_eval_base", "eval/eval_base"),
+        (Path(args.checkpoint_dir) / f"{args.run_name}_eval_tuned", "eval/eval_tuned"),
+        (report_path, "report/experiment.json"),
+        (Path(args.log_dir) / args.run_name / "plots", "report/plots"),
+    ]
+    present = [(p, dest) for p, dest in dataset_items if p.exists()]
+
+    if args.dry_run:
+        print(f"$ [publish] datasets:{base_name}  " +
+              "  ".join(dest for _, dest in present))
+        if adapter.exists():
+            print(f"$ [publish] models:{base_name}-policy-lora  <- {adapter}")
+        results["publish"] = {"status": "dry_run"}
+        return
+
+    from huggingface_hub import HfApi
+    api = HfApi(token=token)
+    ns = args.hf_org or os.environ.get("HF_ORG") or api.whoami()["name"]
+    private = not args.hf_public
+
+    try:
+        sha = sp.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True,
+                     capture_output=True).stdout.strip() or "unknown"
+    except OSError:
+        sha = "unknown"
+    base, tuned = results.get("eval_base", {}), results.get("eval_tuned", {})
+    if not base and report_path.exists():   # publish-only rerun: read the report
+        stages = _read_json(report_path).get("stages", {})
+        base, tuned = stages.get("eval_base", {}), stages.get("eval_tuned", {})
+
+    card = "\n".join([
+        f"# {base_name}",
+        "",
+        "| field | value |", "| --- | --- |",
+        f"| experiment | ICRL safety run `{args.run_name}` (profile `{args.profile}`): "
+        "constraint C_θ learned from safe demos, Lagrangian LoRA fine-tune, "
+        "CuP measured on held-out ST-WebAgentBench tasks |",
+        f"| date_generated | {date} |",
+        f"| source_repo | icrl @ `{sha}` |",
+        f"| models | encoder=`{profile['encoder_model']}`, "
+        f"policy=`{profile['policy_model']}` |",
+        f"| demo_source | safe=`{args.safe_demos}`, unsafe=`{args.unsafe_demos}` |",
+        f"| generation_config | seed={args.seed}, epsilon={_profile_epsilon(args)}, "
+        f"overrides=`{' '.join(profile['overrides'] + (args.override or [])) or 'none'}` |",
+        "| schema | demos/: trajectory jsonl or task_*_trace_*.json; splits/: "
+        "train + held-out jsonl; embeddings/: torch .pt; constraint/: head weights "
+        "+ metrics json; eval/: cup_eval.json per arm; report/: experiment.json + plots |",
+        f"| provenance | `python scripts/run_experiment.py --profile {args.profile} "
+        f"--run-name {args.run_name}` |",
+        "",
+        f"CuP: baseline {_fmt(base.get('cup'))} → tuned {_fmt(tuned.get('cup'))}",
+    ]) + "\n"
+
+    dataset_repo = f"{ns}/{base_name}"
+    api.create_repo(dataset_repo, repo_type="dataset", private=private, exist_ok=True)
+    api.upload_file(path_or_fileobj=card.encode(), path_in_repo="README.md",
+                    repo_id=dataset_repo, repo_type="dataset")
+    for path, dest in present:
+        print(f"  -> {dataset_repo}/{dest}")
+        if path.is_dir():
+            api.upload_folder(folder_path=str(path), path_in_repo=dest,
+                              repo_id=dataset_repo, repo_type="dataset")
+        else:
+            api.upload_file(path_or_fileobj=str(path), path_in_repo=dest,
+                            repo_id=dataset_repo, repo_type="dataset")
+
+    model_repo = None
+    if adapter.exists():
+        model_repo = f"{ns}/{base_name}-policy-lora"
+        print(f"  -> {model_repo} (LoRA adapter)")
+        api.create_repo(model_repo, private=private, exist_ok=True)
+        api.upload_file(path_or_fileobj=card.encode(), path_in_repo="README.md",
+                        repo_id=model_repo)
+        api.upload_folder(folder_path=str(adapter), repo_id=model_repo)
+
+    print(f"publish: done — datasets:{dataset_repo}"
+          + (f", models:{model_repo}" if model_repo else ""))
+    results["publish"] = {"status": "ok", "dataset_repo": dataset_repo,
+                          "model_repo": model_repo,
+                          "uploaded": [dest for _, dest in present]}
+
+
 STAGE_FNS = {
     "preflight": stage_preflight,
     "splits": stage_splits,
@@ -410,6 +574,7 @@ STAGE_FNS = {
     "finetune": stage_finetune,
     "eval_tuned": stage_eval_tuned,
     "plots": stage_plots,
+    "publish": stage_publish,
 }
 
 
@@ -462,7 +627,8 @@ def resolve_demo_paths(args) -> None:
     $SCRATCH/trajectories/{safe,unsafe}, while the repo default is a .jsonl under
     data/demos. Rather than fail on a fresh cluster checkout, fall back to the
     collection output — and say so, because which demos were used changes the
-    result.
+    result. When neither exists, fetch the repo default from the canonical HF
+    demo pool (data/ is only a cache — see src/data/hf_demo_pool.py).
     """
     scratch = os.environ.get("SCRATCH", f"/scratch/{os.environ.get('USER', '')}")
     for attr, default, fallback in (
@@ -480,7 +646,15 @@ def resolve_demo_paths(args) -> None:
             setattr(args, attr, fallback)
             print(f"note: {default} not found — using collection output {fallback}")
         else:
-            setattr(args, attr, default)  # let preflight report it
+            setattr(args, attr, default)
+            if args.dry_run:
+                continue
+            try:
+                from src.data.hf_demo_pool import ensure_local
+                ensure_local([default])
+            except Exception as e:
+                print(f"note: {default} missing and HF pool fetch failed "
+                      f"({e}) — preflight will report it")
 
 
 def _read_json(path: Path) -> dict:
@@ -518,6 +692,8 @@ def print_summary(results: dict, args) -> None:
             extra = (f"  CuP={_fmt(r.get('cup'))} "
                      f"completion={_fmt(r.get('completion_rate'))} "
                      f"violations={_fmt(r.get('violation_rate'))}")
+        elif stage == "publish" and r.get("dataset_repo"):
+            extra = f"  {r['dataset_repo']}"
         print(f"  {stage:12s} {r['status']:12s} "
               f"{f'{secs:6.1f}s' if secs else '':>8s}{extra}")
 
@@ -600,6 +776,14 @@ def main() -> int:
                     help="figure theme (default: light, for papers)")
     ap.add_argument("--pdf", action="store_true",
                     help="also write vector PDFs alongside the PNGs")
+    ap.add_argument("--hf-org", default=None,
+                    help="Hugging Face namespace to publish under "
+                         "(default: $HF_ORG, else the token owner)")
+    ap.add_argument("--hf-public", action="store_true",
+                    help="publish public HF repos (default: private)")
+    ap.add_argument("--force-publish", action="store_true",
+                    help="publish even a mock-env run (normally skipped — "
+                         "mock numbers are not results)")
     ap.add_argument("--wandb", action="store_true")
     ap.add_argument("--wandb-entity", default=None)
     ap.add_argument("--override", action="append", default=[],
