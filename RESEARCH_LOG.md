@@ -1,1 +1,0 @@
-[2026-06-06] For initial safe demos shown to constraint function, migrated from LLM generated trajectories on ST-WebAgentBench, to safe human demos from Web Arena

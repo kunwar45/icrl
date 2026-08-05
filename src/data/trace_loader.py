@@ -3,7 +3,7 @@ Load demos from either format the project produces.
 
 Two writers, two shapes:
 
-  scripts/collect_safe_trajectories.py  → one `task_<id>_trace_<n>.json` per
+  scripts/demos/collect_safe_trajectories.py  → one `task_<id>_trace_<n>.json` per
       trajectory in a directory (this is what the SLURM jobs write to
       $SCRATCH/trajectories/safe)
   the older collectors                  → a single `*.jsonl` of Trajectory dicts

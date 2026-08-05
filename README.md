@@ -18,17 +18,15 @@ python scripts/run_experiment.py --profile cluster   # the real thing
 
 | # | Stage | Script | What it produces |
 |---|-------|--------|------------------|
-| # | Stage | Script | What it produces |
-|---|-------|--------|------------------|
 | 0 | `preflight` | `preflight.py` | fails in seconds on a broken environment |
-| 1 | `splits` | `make_splits.py` | `<data>/train/*.jsonl`, `<data>/eval/*_held_out.jsonl` |
+| 1 | `splits` | `make_train_eval_splits.py` | `<data>/train/*.jsonl`, `<data>/eval/*_held_out.jsonl` |
 | 2 | `encode` | `encode_trajectories.py` | `<data>/embeddings/<run>/{safe,unsafe}.pt` |
 | 3 | `constraint` | `train_constraint.py` | `<ckpt>/<run>/constraint_head.pt` |
 | 4 | `gate` | `eval_constraint.py` | `<ckpt>/<run>/held_out_metrics.json` (AUROC gate) |
 | 5 | `eval_base` | `eval_finetune.py` | CuP of the **untuned** policy |
 | 6 | `finetune` | `run_finetune.py` | `<ckpt>/<run>/final` (LoRA adapter) |
 | 7 | `eval_tuned` | `eval_finetune.py` | CuP of the **tuned** policy |
-| 8 | `plots` | `make_plots.py` | figures + `report.html` |
+| 8 | `plots` | `make_experiment_plots.py` | figures + `report.html` |
 
 Paths come from the compute group (`local` → repo-relative; `carleton` → `$SCRATCH/icrl`), overridable with `--data-root` / `--checkpoint-dir` / `--log-dir`.
 
@@ -61,10 +59,10 @@ scp cluster:~/icrl/logs/icrl_cluster/plots/report.html .   # then just open it
 Regenerate figures at any time without re-running the experiment:
 
 ```bash
-python scripts/make_plots.py --run-name icrl_cluster --pdf
+python scripts/make_experiment_plots.py --run-name icrl_cluster --pdf
 ```
 
-On the cluster: `sbatch slurm/run_experiment.sh` (env vars `PROFILE`, `RUN_NAME`, `STAGES`, `STRICT_GATE`, `EXTRA`).
+On the cluster: `sbatch scripts/slurm/run_experiment_job.sh` (env vars `PROFILE`, `RUN_NAME`, `STAGES`, `STRICT_GATE`, `EXTRA`).
 
 ### Profiles
 
@@ -130,7 +128,7 @@ directives are literal text and cannot read environment variables).
 
 ```bash
 # 0. Discover what THIS cluster offers — accounts, GPU types, modules, quota
-bash scripts/cluster_probe.sh
+bash scripts/infra/cluster_probe.sh
 export ICRL_ACCOUNT=aip-...        # from the output
 export ICRL_GPU=l40s:1             # or h100:1 — from the output
 # If your allocation has no usable /scratch:
@@ -138,21 +136,21 @@ export ICRL_GPU=l40s:1             # or h100:1 — from the output
 
 # 1. One-time setup
 export GITHUB_USER=<you> REPOS_ROOT=$SCRATCH
-bash scripts/setup_cluster.sh
+bash scripts/infra/setup_cluster.sh
 cp .env.example .env && $EDITOR .env
 
 # 2. Prefetch models — LOGIN NODE ONLY (compute nodes have no internet)
-source scripts/session_start.sh
-python scripts/prefetch_models.py --profile cluster
+source scripts/infra/session_start.sh
+python scripts/infra/prefetch_models.py --profile cluster
 
 # 3. Front half: no browser, no CRM, no SuiteCRM needed
-bash scripts/submit_experiment.sh \
+bash scripts/infra/submit_experiment.sh \
     --stages preflight,splits,encode,constraint,gate,plots
 
 # 4. Full run — needs SuiteCRM up on the login node first
-bash scripts/start_suitecrm_apptainer.sh
+bash scripts/infra/start_suitecrm_apptainer.sh
 echo "WA_SUITECRM=http://$(hostname):8080/public" >> .env
-bash scripts/submit_experiment.sh
+bash scripts/infra/submit_experiment.sh
 ```
 
 | Variable | Meaning |
@@ -163,7 +161,7 @@ bash scripts/submit_experiment.sh
 | `ICRL_TIME` / `ICRL_MEM` / `ICRL_CPUS` | defaults `12:00:00` / `64G` / `8` |
 | `PROFILE` / `RUN_NAME` | default `cluster` / `icrl_cluster` |
 
-`DRY_RUN=1 bash scripts/submit_experiment.sh` prints the `sbatch` line without
+`DRY_RUN=1 bash scripts/infra/submit_experiment.sh` prints the `sbatch` line without
 submitting.
 
 **Offline compute nodes.** Alliance compute nodes cannot reach the internet, so
@@ -174,7 +172,7 @@ this, and preflight fails with the exact prefetch command if a model is missing.
 `.env` must set `WA_SUITECRM`, **and also `GITLAB` and `SHOPPING_ADMIN`** —
 ST-WebAgentBench validates every site URL when it loads and refuses to start if
 any is missing, even for SuiteCRM-only tasks. Point them at SuiteCRM if you have
-no other instances; nothing in the easy tier dereferences them. `slurm/env.sh`
+no other instances; nothing in the easy tier dereferences them. `scripts/slurm/env.sh`
 exports `.env` to every stage.
 
 ---
@@ -222,7 +220,7 @@ We maintain **forks** with small compatibility patches. Never push directly to u
 > export SCRATCH=/project/aip-s2ganapa/$USER
 > export ICRL_ROOT=/project/aip-s2ganapa/$USER/icrl
 > ```
-> Do this once per session (or add to `~/.bashrc`) *before* `source scripts/session_start.sh`
+> Do this once per session (or add to `~/.bashrc`) *before* `source scripts/infra/session_start.sh`
 > — otherwise it looks for the repo/venv at `~/icrl` and `/scratch/$USER/...` and fails with
 > `No such file or directory`.
 
@@ -259,7 +257,7 @@ cd ~/icrl
 
 export GITHUB_USER=YOUR_USER
 export REPOS_ROOT=$HOME                    # clones BrowserGym + ST-WebAgentBench here
-bash scripts/setup_cluster.sh
+bash scripts/infra/setup_cluster.sh
 ```
 
 `setup_cluster.sh` will:
@@ -274,7 +272,7 @@ bash scripts/setup_cluster.sh
 **Login-node tip:** Playwright browser download can be slow on login nodes. To skip and install later on a compute node:
 
 ```bash
-SKIP_PLAYWRIGHT=1 bash scripts/setup_cluster.sh
+SKIP_PLAYWRIGHT=1 bash scripts/infra/setup_cluster.sh
 # then on a GPU node or interactive session:
 source /scratch/$USER/venvs/icrl_v4/bin/activate
 playwright install chromium
@@ -289,7 +287,7 @@ source /scratch/$USER/venvs/icrl_v4/bin/activate_icrl.sh
 cd ~/icrl
 ```
 
-Or, simpler, from the repo root: `source scripts/session_start.sh` — it does the module load,
+Or, simpler, from the repo root: `source scripts/infra/session_start.sh` — it does the module load,
 venv activate, `PYTHONPATH` export, and a SuiteCRM reachability check in one step (respects
 `SCRATCH`/`ICRL_ROOT` overrides from the note above).
 
@@ -300,7 +298,7 @@ venv activate, `PYTHONPATH` export, and a SuiteCRM reachability check in one ste
 | `ICRL_ROOT` | `~/icrl` |
 | `STWEBAGENT_ROOT` | `$REPOS_ROOT/ST-WebAgentBench` |
 | `BROWSERGYM_ROOT` | `$REPOS_ROOT/BrowserGym` |
-| `PYTHONPATH` | `icrl/gridworld` + `icrl/src` |
+| `PYTHONPATH` | repo root (for `src.*`) + `icrl/src` (for `icrl.*`) |
 
 ---
 
@@ -328,7 +326,7 @@ WA_SUITECRM=http://login3:8080/public
 
 > Replace `login3` with the hostname of the login node where SuiteCRM runs (`hostname` on that node).
 
-SLURM jobs load `~/icrl/.env` automatically via `scripts/collect_safe_trajectories.py`. When `WA_SUITECRM` is set, jobs **skip** SuiteCRM startup and connect directly to your login-node instance.
+SLURM jobs load `~/icrl/.env` automatically via `scripts/demos/collect_safe_trajectories.py`. When `WA_SUITECRM` is set, jobs **skip** SuiteCRM startup and connect directly to your login-node instance.
 
 ---
 
@@ -377,7 +375,7 @@ apptainer pull /scratch/$USER/apptainer/suitecrm.sif \
 
 ```bash
 module load apptainer/1.4.5
-bash scripts/start_suitecrm_apptainer.sh
+bash scripts/infra/start_suitecrm_apptainer.sh
 ```
 
 The script waits for SuiteCRM to respond (up to 10 min) before returning. First boot initialises the database and takes ~10 min; subsequent starts take ~1 min.
@@ -438,16 +436,16 @@ Default SuiteCRM credentials (Bitnami image): **user** / **bitnami**
 ### 3e. Manage instances
 
 ```bash
-bash scripts/start_suitecrm_apptainer.sh            # start + wait for HTTP (default)
-bash scripts/start_suitecrm_apptainer.sh --status   # list running instances
-bash scripts/start_suitecrm_apptainer.sh --stop     # stop both
+bash scripts/infra/start_suitecrm_apptainer.sh            # start + wait for HTTP (default)
+bash scripts/infra/start_suitecrm_apptainer.sh --status   # list running instances
+bash scripts/infra/start_suitecrm_apptainer.sh --stop     # stop both
 ```
 
 ### After a login-node reboot
 
 ```bash
 module load apptainer/1.4.5
-bash scripts/start_suitecrm_apptainer.sh
+bash scripts/infra/start_suitecrm_apptainer.sh
 ```
 
 Data persists in `/scratch/$USER/suitecrm/{mariadb,app}` — you do **not** need to re-pull SIF images or re-initialise the DB.
@@ -482,10 +480,10 @@ python -c "import browsergym.stwebagentbench, gymnasium as gym; \
 python -c "from icrl.envs.stwebagent import STWebAgentEnv; print('OK')"
 
 # No browser or GPU needed
-python scripts/smoke_collection.py
+python scripts/demos/smoke_test_demo_collection.py
 
 # Live browser episode (SuiteCRM must be reachable)
-python scripts/run_demo.py --task-id 235 --max-steps 15
+python scripts/demos/run_single_task_demo.py --task-id 235 --max-steps 15
 ```
 
 ---
@@ -517,7 +515,7 @@ curl -sf http://login3:8080/public -o /dev/null && echo "CRM OK" || echo "CRM DO
 Validates imports, `.env`, and task IDs without starting vLLM or SuiteCRM:
 
 ```bash
-DRY_RUN=1 sbatch --gres= --mem=4G --time=00:05:00 slurm/gen_safe_demos.sh
+DRY_RUN=1 sbatch --gres= --mem=4G --time=00:05:00 scripts/slurm/collect_safe_trajectories_job.sh
 tail -f logs/slurm/icrl-gen_*.out
 ```
 
@@ -527,14 +525,14 @@ Starts vLLM with **Qwen2.5-72B** (4× H100, tensor-parallel=4), then collects Cu
 
 ```bash
 # Smoke test: first 2 tasks
-N_TASKS=2 sbatch slurm/gen_safe_demos.sh
+N_TASKS=2 sbatch scripts/slurm/collect_safe_trajectories_job.sh
 tail -f logs/slurm/icrl-gen_*.out
 
 # All 20 easy tasks
-sbatch slurm/gen_safe_demos.sh
+sbatch scripts/slurm/collect_safe_trajectories_job.sh
 
 # Explicit task IDs
-TASK_IDS="235 236 237" sbatch slurm/gen_safe_demos.sh
+TASK_IDS="235 236 237" sbatch scripts/slurm/collect_safe_trajectories_job.sh
 ```
 
 **Output:** `/scratch/$USER/trajectories/safe/task_*_trace_*.json`
@@ -555,7 +553,7 @@ TASK_IDS="235 236 237" sbatch slurm/gen_safe_demos.sh
 ### 5c. Unsafe (adversarial) demo collection
 
 ```bash
-sbatch slurm/collect_unsafe_demos.sh
+sbatch scripts/slurm/collect_unsafe_demos_job.sh
 ```
 
 Uses Qwen-7B on 1× H100 without safety prompt (policy violations are the signal).
@@ -564,12 +562,12 @@ Uses Qwen-7B on 1× H100 without safety prompt (policy violations are the signal
 
 | Script | GPUs | Purpose |
 |--------|------|---------|
-| `slurm/embed_trajectories.sh` | 1 | Embed collected trajectories |
-| `slurm/constraint_job.sh` | 1 | Train constraint encoder |
-| `slurm/finetune_job.sh` | 2 | Fine-tune orchestrator |
-| `slurm/cot_dataset_job.sh` | 1 | Build CoT dataset |
-| `slurm/cot_finetune_job.sh` | 2 | CoT fine-tuning |
-| `slurm/array_sweep.sh` | 2 × 9 | Hyperparameter sweep |
+| `scripts/slurm/encode_trajectories_job.sh` | 1 | Embed collected trajectories |
+| `scripts/slurm/train_constraint_job.sh` | 1 | Train constraint encoder |
+| `scripts/slurm/run_finetune_job.sh` | 2 | Fine-tune orchestrator |
+| `scripts/slurm/cot_build_dataset_job.sh` | 1 | Build CoT dataset |
+| `scripts/slurm/cot_finetune_job.sh` | 2 | CoT fine-tuning |
+| `scripts/slurm/sweep_finetune_array_job.sh` | 2 × 9 | Hyperparameter sweep |
 
 ### Monitor jobs
 
@@ -612,7 +610,7 @@ scancel JOBID
 | MariaDB `Read-only file system` | Add `--writable-tmpfs` to `instance run` |
 | Only `appinit` running, no `mariadbd` | Use `instance run`, not `instance start` |
 | `curl localhost:8080` fails right after start | SuiteCRM is still booting — the script now waits automatically; check `~/.apptainer/instances/logs/$HOSTNAME/$USER/suitecrm.out` if it times out |
-| `No space left on device` in suitecrm.err | The bitnami SIF has a large Angular cache baked in; the tiny tmpfs overlay fills up when the entrypoint tries to delete it. Fixed: `start_suitecrm_apptainer.sh` now uses a 2 GB persistent ext3 overlay (`/scratch/$USER/apptainer/suitecrm_overlay.img`) instead of `--writable-tmpfs`. If corrupted, recreate with `bash scripts/start_suitecrm_apptainer.sh --reset-overlay`. |
+| `No space left on device` in suitecrm.err | The bitnami SIF has a large Angular cache baked in; the tiny tmpfs overlay fills up when the entrypoint tries to delete it. Fixed: `start_suitecrm_apptainer.sh` now uses a 2 GB persistent ext3 overlay (`/scratch/$USER/apptainer/suitecrm_overlay.img`) instead of `--writable-tmpfs`. If corrupted, recreate with `bash scripts/infra/start_suitecrm_apptainer.sh --reset-overlay`. |
 | `Device or resource busy` on `.angular` | Caused by an old version of the script that bind-mounted `.angular` to scratch — the mountpoint couldn't be rmdir'd. Update to the current script which uses `--overlay`. |
 | Compute node can't reach CRM | Use login-node hostname in `WA_SUITECRM`, not `localhost`; confirm port 8080 reachable from compute nodes |
 | `apptainer pull` slow / fails on `/scratch` | Set `APPTAINER_TMPDIR=/scratch/$USER/apptainer/tmp` |
@@ -633,7 +631,7 @@ scancel JOBID
 | `typing_extensions` import errors | `pip install "typing_extensions>=4.13.0" --force-reinstall --no-deps` |
 | 0 ST-WebAgent tasks registered | Re-run `setup_cluster.sh`; check `stwebagentbench.pth` in site-packages |
 | `ModuleNotFoundError: icrl` | `source activate_icrl.sh` to set `PYTHONPATH` |
-| `~/icrl/scripts/session_start.sh: No such file or directory` | Repo/venv live under `/project/...` on this account, not `~/icrl` and `/scratch/$USER`. `cd` into the actual repo dir and export `SCRATCH`/`ICRL_ROOT` first — see the `/scratch` vs `/project` note near the top. |
+| `~/icrl/scripts/infra/session_start.sh: No such file or directory` | Repo/venv live under `/project/...` on this account, not `~/icrl` and `/scratch/$USER`. `cd` into the actual repo dir and export `SCRATCH`/`ICRL_ROOT` first — see the `/scratch` vs `/project` note near the top. |
 
 ### Logs
 
@@ -654,7 +652,7 @@ tail -f logs/slurm/vllm_*.log
 For development off-cluster, use Docker Compose:
 
 ```bash
-bash scripts/start_suitecrm.sh
+bash scripts/infra/start_suitecrm_docker.sh
 # first boot — load demo data:
 docker exec -i suitecrm_setup-mariadb-1 \
   mysql -u bn_suitecrm -pbitnami123 bitnami_suitecrm \
@@ -677,7 +675,7 @@ Set `WA_SUITECRM=http://localhost:8080/public` in `.env`.
 ```bash
 export GITHUB_USER=YOUR_USER
 export REPOS_ROOT=$HOME
-bash scripts/setup_fork_remotes.sh
+bash scripts/infra/setup_fork_remotes.sh
 ```
 
 ### icrl-specific patches (ST-WebAgentBench fork)
@@ -702,11 +700,22 @@ git fetch upstream && git merge upstream/main && git push fork main
 ~/ST-WebAgentBench/             fork of segev-shlomov/ST-WebAgentBench
 
 icrl/
-  src/                          constraint encoder, Lagrangian PPO, data pipeline
-  gridworld/                    gridworld ICRL reference
-  configs/                      Hydra configs (compute/carleton.yaml)
-  scripts/                      entry points, setup_cluster.sh, start_suitecrm_apptainer.sh
-  slurm/                        SLURM job templates + env.sh
+  src/                          reusable code: constraint encoder, Lagrangian PPO, data
+                                pipeline (src.*) + the icrl package (gridworld ICRL reference)
+  scripts/                      pipeline drivers, foldered by stage:
+    run_experiment.py             the end-to-end driver (+ preflight.py, sweep_finetune_hyperparams.py, make_experiment_plots.py)
+    demos/                        demo collection + splits
+    constraint/                   encode / train / gate the constraint head
+    finetune/                     Lagrangian fine-tune + CuP eval
+    cot/                          CoT dataset + fine-tune
+    probe/                        probing / activation patching
+    gridworld/                    gridworld ICRL reference entry points
+    infra/                        cluster setup, SuiteCRM, session_start.sh
+    slurm/                        SLURM job templates + env.sh
+  configs/                      Hydra configs, foldered by stage (compute/, constraint/, ...)
+  scratch/                      one-off scripts and verification snippets
+  docs/                         LOG.md (research log) + proposal.md
+  tests/                        unit + integration tests
 ```
 
 ### Requirements files
@@ -722,9 +731,10 @@ icrl/
 ## Tests
 
 ```bash
-export PYTHONPATH=gridworld:src
-pytest gridworld/tests/unit/ -q
-pytest tests/ --ignore=tests/test_reasoning_trace.py -q
+export PYTHONPATH=.:src
+pytest tests/unit/ -q                                              # icrl package units
+pytest tests/ --ignore=tests/test_reasoning_trace.py \
+              --ignore=tests/integration -q                        # src.* + e2e contract
 ```
 
 ---
@@ -739,7 +749,7 @@ pytest tests/ --ignore=tests/test_reasoning_trace.py -q
 # === ONE TIME ===
 git clone git@github.com:YOUR_USER/icrl.git ~/icrl && cd ~/icrl
 export GITHUB_USER=YOUR_USER REPOS_ROOT=$HOME
-bash scripts/setup_cluster.sh
+bash scripts/infra/setup_cluster.sh
 cp .env.example .env && $EDITOR .env
 
 module load apptainer/1.4.5
@@ -747,17 +757,17 @@ mkdir -p /scratch/$USER/apptainer/tmp
 export APPTAINER_TMPDIR=/scratch/$USER/apptainer/tmp
 apptainer pull /scratch/$USER/apptainer/mariadb.sif docker://bitnamilegacy/mariadb:11.4
 apptainer pull /scratch/$USER/apptainer/suitecrm.sif docker://bitnamilegacy/suitecrm:8
-bash scripts/start_suitecrm_apptainer.sh   # starts + waits until HTTP 200
+bash scripts/infra/start_suitecrm_apptainer.sh   # starts + waits until HTTP 200
 echo "WA_SUITECRM=http://$(hostname):8080/public" >> ~/icrl/.env
 
 # === EVERY SESSION ===
-source scripts/session_start.sh   # or manually:
+source scripts/infra/session_start.sh   # or manually:
 source /scratch/$USER/venvs/icrl_v4/bin/activate
 source /scratch/$USER/venvs/icrl_v4/bin/activate_icrl.sh
 cd ~/icrl
 
 # === RUN COLLECTION ===
 mkdir -p logs/slurm
-N_TASKS=2 sbatch slurm/gen_safe_demos.sh
+N_TASKS=2 sbatch scripts/slurm/collect_safe_trajectories_job.sh
 tail -f logs/slurm/icrl-gen_*.out
 ```

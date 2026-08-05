@@ -129,7 +129,7 @@ def check_model_resolvable(label: str, model_name: str) -> None:
         record(FAIL, f"model {label}",
                f"{model_name} is not in the local cache ({os.environ.get('HF_HOME', '~/.cache')}). "
                f"Compute nodes have no internet — prefetch it on the LOGIN node: "
-               f"python scripts/prefetch_models.py --models {model_name}")
+               f"python scripts/infra/prefetch_models.py --models {model_name}")
         return
     gated = "gated" in lowered or "401" in msg or "authorized" in lowered
     record(FAIL, f"model {label}", f"{model_name}: {msg}"
@@ -181,7 +181,7 @@ def check_benchmark(task_ids: list[str]) -> None:
     registered = {e.split(".")[-1] for e in gym.envs.registry if "STWebAgent" in e}
     if not registered:
         record(FAIL, "task registration",
-               "0 tasks — re-run scripts/setup_cluster.sh; check stwebagentbench.pth")
+               "0 tasks — re-run scripts/infra/setup_cluster.sh; check stwebagentbench.pth")
         return
     record(OK, "task registration", f"{len(registered)} tasks")
 
@@ -256,7 +256,7 @@ def check_suitecrm() -> None:
     url = os.environ.get("WA_SUITECRM") or os.environ.get("SUITECRM")
     if not url:
         record(FAIL, "WA_SUITECRM",
-               "unset — start SuiteCRM (scripts/start_suitecrm_apptainer.sh) and "
+               "unset — start SuiteCRM (scripts/infra/start_suitecrm_apptainer.sh) and "
                "put WA_SUITECRM=http://<login-node>:8080/public in .env")
         return
     import urllib.error

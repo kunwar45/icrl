@@ -7,14 +7,14 @@ independently runnable and a failure points at one command you can re-run by
 hand:
 
     0. preflight       scripts/preflight.py          environment is actually usable
-    1. splits          scripts/make_splits.py        train / held-out demos
-    2. encode          scripts/encode_trajectories.py cached backbone embeddings
-    3. constraint      scripts/train_constraint.py   train C_theta
-    4. gate            scripts/eval_constraint.py    held-out AUROC gate
-    5. eval_base       scripts/eval_finetune.py      CuP of the untuned policy
-    6. finetune        scripts/run_finetune.py       Lagrangian constrained PG
-    7. eval_tuned      scripts/eval_finetune.py      CuP of the tuned policy
-    8. plots           scripts/make_plots.py         figures + one HTML report
+    1. splits          scripts/demos/make_train_eval_splits.py        train / held-out demos
+    2. encode          scripts/constraint/encode_trajectories.py cached backbone embeddings
+    3. constraint      scripts/constraint/train_constraint.py   train C_theta
+    4. gate            scripts/constraint/eval_constraint.py    held-out AUROC gate
+    5. eval_base       scripts/finetune/eval_finetune.py      CuP of the untuned policy
+    6. finetune        scripts/finetune/run_finetune.py       Lagrangian constrained PG
+    7. eval_tuned      scripts/finetune/eval_finetune.py      CuP of the tuned policy
+    8. plots           scripts/make_experiment_plots.py         figures + one HTML report
 
 Profiles
 --------
@@ -122,7 +122,7 @@ PROFILES: dict[str, dict] = {
         # Any $SCRATCH-based compute group works; killarney and carleton are
         # identical in shape. Override with --compute.
         "compute": "killarney",
-        # Easy-tier SuiteCRM tasks (the IDs gen_safe_demos.sh collects), split so
+        # Easy-tier SuiteCRM tasks (the IDs collect_safe_trajectories_job.sh collects), split so
         # the CuP number comes from tasks the policy never trained on.
         "train_task_ids": [str(i) for i in range(235, 250)],
         "eval_task_ids": [str(i) for i in range(250, 255)],
@@ -278,7 +278,7 @@ def stage_preflight(args, profile, results):
 
 
 def stage_splits(args, profile, results):
-    cmd = [python_bin(), "scripts/make_splits.py",
+    cmd = [python_bin(), "scripts/demos/make_train_eval_splits.py",
            "--safe", args.safe_demos, "--unsafe", args.unsafe_demos,
            "--train-dir", os.path.join(args.data_root, "train"),
            "--eval-dir", os.path.join(args.data_root, "eval"),
@@ -300,7 +300,7 @@ def stage_encode(args, profile, results):
     for label, jsonl in (("safe", os.path.join(args.data_root, "train", "safe.jsonl")),
                          ("unsafe", os.path.join(args.data_root, "train", "unsafe.jsonl"))):
         out = emb_dir / f"{label}.pt"
-        cmd = [python_bin(), "scripts/encode_trajectories.py",
+        cmd = [python_bin(), "scripts/constraint/encode_trajectories.py",
                "--jsonl", jsonl, "--label", label, "--output", str(out),
                "--model", profile["encoder_model"],
                "--max-length", _override_value(profile, "constraint.encoder.max_length", "2048"),
@@ -320,13 +320,13 @@ def stage_constraint(args, profile, results):
             f"constraint.encoder.safe_embeddings_path={emb_dir / 'safe.pt'}",
             f"constraint.encoder.unsafe_embeddings_path={emb_dir / 'unsafe.pt'}",
         ]
-    _, elapsed = run_cmd(hydra_cmd("train_constraint.py", ov), dry_run=args.dry_run)
+    _, elapsed = run_cmd(hydra_cmd("constraint/train_constraint.py", ov), dry_run=args.dry_run)
     results["constraint"] = {"status": "ok", "seconds": elapsed}
 
 
 def stage_gate(args, profile, results):
     ov = common_overrides(profile, args)
-    code, elapsed = run_cmd(hydra_cmd("eval_constraint.py", ov),
+    code, elapsed = run_cmd(hydra_cmd("constraint/eval_constraint.py", ov),
                             dry_run=args.dry_run, allow_fail=not args.strict_gate)
     metrics = _read_json(Path(args.checkpoint_dir) / args.run_name / "held_out_metrics.json")
     passed = bool(metrics.get("passed")) if metrics else code == 0
@@ -348,7 +348,7 @@ def _eval_stage(args, profile, results, key: str, run_suffix: str, policy_path: 
     ov.append("finetune.eval.task_ids=[" + ",".join(profile["eval_task_ids"]) + "]")
     if policy_path:
         ov.append(f"finetune.eval.policy_path={policy_path}")
-    _, elapsed = run_cmd(hydra_cmd("eval_finetune.py", ov), dry_run=args.dry_run)
+    _, elapsed = run_cmd(hydra_cmd("finetune/eval_finetune.py", ov), dry_run=args.dry_run)
 
     summary = _read_json(
         Path(args.checkpoint_dir) / f"{args.run_name}_{run_suffix}" / "cup_eval.json"
@@ -362,7 +362,7 @@ def stage_eval_base(args, profile, results):
 
 def stage_finetune(args, profile, results):
     ov = common_overrides(profile, args)
-    _, elapsed = run_cmd(hydra_cmd("run_finetune.py", ov), dry_run=args.dry_run)
+    _, elapsed = run_cmd(hydra_cmd("finetune/run_finetune.py", ov), dry_run=args.dry_run)
     results["finetune"] = {"status": "ok", "seconds": elapsed}
 
 
@@ -378,7 +378,7 @@ def stage_plots(args, profile, results):
     Figures + a single self-contained HTML report.
 
     Never fails the run: a job that got as far as producing numbers should not
-    be marked failed because a chart could not be drawn, and make_plots.py
+    be marked failed because a chart could not be drawn, and make_experiment_plots.py
     already skips whatever the run did not produce.
     """
     # Flush stage timings first — the timings figure reads this file.
@@ -386,7 +386,7 @@ def stage_plots(args, profile, results):
         write_run_report(results, args)
 
     out_dir = os.path.join(args.log_dir, args.run_name, "plots")
-    cmd = [python_bin(), "scripts/make_plots.py",
+    cmd = [python_bin(), "scripts/make_experiment_plots.py",
            "--run-name", args.run_name,
            "--log-dir", args.log_dir,
            "--checkpoint-dir", args.checkpoint_dir,

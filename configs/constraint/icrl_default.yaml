@@ -3,7 +3,7 @@ constraint:
   encoder:
     # Frozen Qwen base model for mean-pool embeddings.
     # 1.5B fits on one A100 with batch_size=16 and max_length=2048 (~3 GB bfloat16).
-    # Pre-compute embeddings with scripts/encode_trajectories.py → slurm/encode_job.sh
+    # Pre-compute embeddings with scripts/constraint/encode_trajectories.py → scripts/slurm/encode_trajectories_job.sh
     # to avoid re-running the backbone on every training restart.
     model_name: Qwen/Qwen2.5-1.5B
     max_length: 2048

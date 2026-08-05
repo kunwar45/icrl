@@ -20,7 +20,7 @@ paths:
   log_dir: logs/
   benchmark_root: ${oc.env:STWEBAGENT_ROOT,""}
 
-# Demo splits produced by scripts/make_splits.py, relative to paths.data_root.
+# Demo splits produced by scripts/demos/make_train_eval_splits.py, relative to paths.data_root.
 # Training reads the train split; the gate check reads the held-out split.
 data:
   train_safe: train/safe.jsonl

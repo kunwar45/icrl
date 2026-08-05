@@ -1,6 +1,6 @@
 """
 Policy rollout plumbing shared by fine-tuning (src/finetune/lagrangian.py) and
-evaluation (scripts/eval_finetune.py).
+evaluation (scripts/finetune/eval_finetune.py).
 
 One place decides how an observation becomes a prompt, how a generation becomes
 an action, and how an episode becomes a Trajectory — so the reward the trainer
@@ -222,7 +222,7 @@ def rollout_episode(
     """
     Run one episode and package it as a RolloutResult.
 
-    Follows the same environment contract as scripts/collect_safe_trajectories.py,
+    Follows the same environment contract as scripts/demos/collect_safe_trajectories.py,
     so trajectories produced here are comparable with the collected demos:
 
       * the action is posted to the chat before env.step

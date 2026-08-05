@@ -1,0 +1,33 @@
+#!/bin/bash
+#SBATCH --job-name=icrl-sweep
+#SBATCH --account=def-s2ganapa
+#SBATCH --array=0-8
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:h100:2
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
+#SBATCH --time=24:00:00
+#SBATCH --output=logs/slurm/%x_%A_%a.out
+#SBATCH --error=logs/slurm/%x_%A_%a.err
+
+set -euo pipefail
+# Slurm copies the batch script into a spool directory before running it, so
+# "$(dirname "$0")" points at /cm/local/.../spool/job<N>/ and not at the repo.
+# SLURM_SUBMIT_DIR is the directory sbatch was invoked from — the repo root.
+ICRL_REPO="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+cd "${ICRL_REPO}"
+source "${ICRL_REPO}/scripts/slurm/env.sh"
+
+EPSILONS=(0.05 0.1 0.2)
+SEEDS=(42 123 456)
+
+IDX=$SLURM_ARRAY_TASK_ID
+EPS=${EPSILONS[$((IDX / 3))]}
+SEED=${SEEDS[$((IDX % 3))]}
+RUN_NAME="finetune_eps${EPS}_seed${SEED}"
+
+python scripts/finetune/run_finetune.py \
+    +compute=carleton \
+    run_name=$RUN_NAME \
+    finetune.constraint.epsilon=$EPS \
+    seed=$SEED

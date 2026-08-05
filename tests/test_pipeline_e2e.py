@@ -389,7 +389,7 @@ def test_make_splits_holds_out_whole_tasks(tmp_path):
     write(unsafe, rows("unsafe", 8))
 
     proc = subprocess.run(
-        [sys.executable, "scripts/make_splits.py",
+        [sys.executable, "scripts/demos/make_train_eval_splits.py",
          "--safe", str(safe), "--unsafe", str(unsafe),
          "--train-dir", str(tmp_path / "train"),
          "--eval-dir", str(tmp_path / "eval"),

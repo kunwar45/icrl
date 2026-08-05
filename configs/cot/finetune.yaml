@@ -1,6 +1,6 @@
 # @package _global_
 # Overrides for CoT deception fine-tuning — merged on top of configs/finetune/lagrangian_ppo.yaml
-# Usage: python scripts/cot_finetune.py +finetune=lagrangian_ppo +cot=finetune run_name=cot_ft_v1
+# Usage: python scripts/cot/cot_finetune.py +finetune=lagrangian_ppo +cot=finetune run_name=cot_ft_v1
 
 finetune:
   policy:

@@ -153,7 +153,7 @@ def load_constraint_head(encoder: TrajectoryEncoder, head_path: str,
     if trained_on and model_name and trained_on != model_name:
         raise ValueError(
             f"{head_path} was trained with encoder '{trained_on}' but the current "
-            f"config uses '{model_name}'. Re-run scripts/train_constraint.py with "
+            f"config uses '{model_name}'. Re-run scripts/constraint/train_constraint.py with "
             f"constraint.encoder.model_name={trained_on}, or point "
             f"constraint.head_path at the head trained for '{model_name}'."
         )

@@ -162,7 +162,7 @@ class ICRLTrainer:
         # every time series unplottable.
         self.metrics_logger     = MetricsLogger(log_dir, f"{run_name}_constraint")
 
-        # Pre-computed backbone outputs (scripts/encode_trajectories.py). When
+        # Pre-computed backbone outputs (scripts/constraint/encode_trajectories.py). When
         # supplied, train() skips backbone inference entirely — the backbone is
         # frozen so the embeddings are identical either way.
         self.expert_embeddings = self._to_head_device(expert_embeddings)

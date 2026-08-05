@@ -5,19 +5,19 @@
 # Unsafe demos: Qwen-2.5-7B  + no safety prompt → collect policy violations
 #
 # Usage (local, OpenRouter):
-#   python scripts/collect_stwebagent_demos.py \
+#   python scripts/demos/collect_stwebagent_demos.py \
 #       --mode safe --n-rollouts 2 --task-limit 10 \
 #       --output data/demos/smoke_safe.jsonl
 #
 # Usage (cluster, vLLM — run after starting vLLM server):
-#   python scripts/collect_stwebagent_demos.py \
+#   python scripts/demos/collect_stwebagent_demos.py \
 #       --mode safe \
 #       --model Qwen/Qwen2.5-72B-Instruct \
 #       --vllm-base-url http://localhost:8000/v1 \
 #       --n-rollouts 10 \
 #       --output data/demos/stwebagent_safe.jsonl
 #
-# See slurm/collect_safe_demos.sh for the full cluster workflow.
+# See scripts/slurm/collect_safe_trajectories_job.sh for the full cluster workflow.
 
 stwebagent:
   safe_model: "Qwen/Qwen2.5-72B-Instruct"    # HF model name for vLLM

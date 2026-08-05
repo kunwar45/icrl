@@ -1,0 +1,79 @@
+#!/bin/bash
+# Collect unsafe (adversarial) demonstrations from ST-WebAgentBench using Qwen-2.5-7B.
+#
+# Strategy: run WITHOUT safety system prompt. Smaller model naturally skips
+# confirmation steps and violates policies — exactly the adversarial signal ICRL needs.
+# The agent doesn't need to succeed at the task; policy violations are what matter.
+#
+# Usage:
+#   sbatch scripts/slurm/collect_unsafe_demos_job.sh
+#   sbatch scripts/slurm/collect_unsafe_demos_job.sh --task-limit 50   # smoke test
+#
+# Runs on 1× A100 (Qwen-7B fits comfortably).
+
+#SBATCH --job-name=icrl-unsafe-demos
+#SBATCH --account=def-s2ganapa
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:h100:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=06:00:00
+#SBATCH --output=logs/slurm/%x_%j.out
+#SBATCH --error=logs/slurm/%x_%j.err
+
+set -euo pipefail
+
+# Slurm copies the batch script into a spool directory before running it, so
+# "$(dirname "$0")" points at /cm/local/.../spool/job<N>/ and not at the repo.
+# SLURM_SUBMIT_DIR is the directory sbatch was invoked from — the repo root.
+ICRL_REPO="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+cd "${ICRL_REPO}"
+source "${ICRL_REPO}/scripts/slurm/env.sh"
+
+mkdir -p logs/slurm data/demos
+
+# ── Start vLLM server ─────────────────────────────────────────────────────────
+echo "[$(date)] Starting vLLM server for Qwen-2.5-7B (tensor-parallel=1)..."
+VLLM_USE_FLASHINFER_SAMPLER=0 python -m vllm.entrypoints.openai.api_server \
+    --model Qwen/Qwen2.5-7B-Instruct \
+    --tensor-parallel-size 1 \
+    --port 8000 \
+    --max-model-len 8192 \
+    > logs/slurm/vllm_unsafe_${SLURM_JOB_ID}.log 2>&1 &
+VLLM_PID=$!
+
+echo "[$(date)] Waiting for vLLM server to be ready..."
+MAX_WAIT_VLLM=600
+WAITED_VLLM=0
+until curl -sf http://localhost:8000/health > /dev/null 2>&1; do
+    if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
+        echo "ERROR: vLLM process (PID ${VLLM_PID}) died during startup"
+        tail -30 logs/slurm/vllm_unsafe_${SLURM_JOB_ID}.log >&2
+        exit 1
+    fi
+    sleep 5
+    WAITED_VLLM=$((WAITED_VLLM + 5))
+    if [ "${WAITED_VLLM}" -ge "${MAX_WAIT_VLLM}" ]; then
+        echo "ERROR: vLLM did not come up after ${MAX_WAIT_VLLM}s"
+        tail -30 logs/slurm/vllm_unsafe_${SLURM_JOB_ID}.log >&2
+        exit 1
+    fi
+done
+echo "[$(date)] vLLM server ready after ${WAITED_VLLM}s."
+
+# ── Run collection ─────────────────────────────────────────────────────────────
+python scripts/demos/collect_stwebagent_demos.py \
+    --mode unsafe \
+    --model Qwen/Qwen2.5-7B-Instruct \
+    --vllm-base-url http://localhost:8000/v1 \
+    --n-rollouts 5 \
+    --max-steps 30 \
+    --benchmark-root "${STWEBAGENT_ROOT}" \
+    --output data/demos/stwebagent_unsafe.jsonl \
+    "$@"
+
+# ── Cleanup ───────────────────────────────────────────────────────────────────
+echo "[$(date)] Shutting down vLLM server (PID $VLLM_PID)..."
+kill $VLLM_PID 2>/dev/null || true
+wait $VLLM_PID 2>/dev/null || true
+echo "[$(date)] Done."

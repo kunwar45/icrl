@@ -1,6 +1,6 @@
 # @package _global_
 # Overrides for CoT deception experiment — merged on top of configs/constraint/icrl_default.yaml
-# Usage: python scripts/train_constraint.py +constraint=icrl_default +cot=constraint run_name=cot_constraint_v1
+# Usage: python scripts/constraint/train_constraint.py +constraint=icrl_default +cot=constraint run_name=cot_constraint_v1
 
 constraint:
   encoder:

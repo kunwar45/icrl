@@ -3,11 +3,11 @@
 #
 # Usage:
 #   # Download pre-recorded BrowserGym traces from HuggingFace:
-#   python scripts/collect_webarena_demos.py --from-hf \
+#   python scripts/demos/collect_webarena_demos.py --from-hf \
 #       --output data/demos/webarena_safe.jsonl
 #
 #   # Run fresh GPT-4o rollouts on WebArena (needs OPENAI_API_KEY):
-#   python scripts/collect_webarena_demos.py --run-agentlab \
+#   python scripts/demos/collect_webarena_demos.py --run-agentlab \
 #       --n-rollouts 5 --n-jobs 8 \
 #       --output data/demos/webarena_safe.jsonl
 #

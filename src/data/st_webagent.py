@@ -37,7 +37,7 @@ _ENV_ID_TEMPLATE = "browsergym/STWebAgentBenchEnv.{task_id}"
 _OBS_KEYS_TO_KEEP = {"goal", "url", "axtree_object", "policies", "chat_messages", "pruned_html"}
 
 
-# ── Observation helpers (copied from gridworld/icrl/envs/stwebagent.py) ───────
+# ── Observation helpers (copied from src/icrl/envs/stwebagent.py) ───────
 
 def _strip_screenshot(obs: dict) -> dict:
     return {k: v for k, v in obs.items() if k in _OBS_KEYS_TO_KEEP}
@@ -256,7 +256,7 @@ class STWebAgentBench:
     def inject_task_id_map(self, mapping: Dict[str, List[str]]) -> None:
         """
         Directly populate _tasks from a {task_type: [task_id, ...]} dict.
-        Bypasses all file discovery. Called from collect_demos.py when
+        Bypasses all file discovery. Called from collect_suitecrm_safe_unsafe_demos.py when
         cfg.collection.task_ids is non-empty.
         """
         tasks: Dict = {}
