@@ -23,7 +23,7 @@ class FakeAdapter(BenchmarkAdapter):
     """
     name = "fake"
 
-    def make_env(self, task_id):
+    def make_env(self, task_id, max_steps=None):
         return {"task_id": task_id, "step": 0, "outcome": None}
 
     def reset(self, env):

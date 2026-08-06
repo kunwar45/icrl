@@ -38,7 +38,8 @@ class FakeAdapter(BenchmarkAdapter):
         self._attempts[task_id] = self._attempts.get(task_id, 0) + 1
         return script[i]
 
-    def make_env(self, task_id):
+    def make_env(self, task_id, max_steps=None):
+        self.last_max_steps = max_steps
         return {"task_id": task_id, "episode": self._episode(task_id), "step": 0}
 
     def reset(self, env):
@@ -162,6 +163,17 @@ def test_run_episode_records_steps_and_report():
     assert result["terminated"]
     assert result["n_steps"] == 2
     assert result["steps"][0]["action"] == "click('1')"
+
+
+def test_run_episode_pushes_max_steps_into_env():
+    # The env must receive the episode horizon — benchmarks with an internal
+    # default (ST-WebAgentBench: 20) silently cap the episode otherwise.
+    adapter = FakeAdapter({"task_ids": [1], "script": {
+        "1": [{"reward": 1.0, "terminated": True, "violations": []}]}})
+    cfg = {"model": {"name": "m"}, "prompt": {"system": "s", "user": "u {goal}"},
+           "episode": {"max_steps": 7}}
+    run_episode(adapter, FakeClient(), cfg, 1, temperature=0.0)
+    assert adapter.last_max_steps == 7
 
 
 def test_run_episode_survives_unparsable_output():

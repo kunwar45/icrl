@@ -73,7 +73,7 @@ def run_episode(adapter, client, cfg: dict, task_id: int | str,
 
     env = None
     try:
-        env = adapter.make_env(task_id)
+        env = adapter.make_env(task_id, max_steps=max_steps)
         obs = adapter.reset(env)
         result["policies"] = getattr(adapter, "raw_policies", lambda o: [])(obs)
 

@@ -25,8 +25,13 @@ class BenchmarkAdapter(ABC):
     # ── Environment lifecycle ────────────────────────────────────────────────
 
     @abstractmethod
-    def make_env(self, task_id: int | str) -> Any:
-        """Build (but do not reset) the environment for one task."""
+    def make_env(self, task_id: int | str, max_steps: int | None = None) -> Any:
+        """
+        Build (but do not reset) the environment for one task. max_steps, when
+        given, must bound the episode inside the environment itself — benchmarks
+        with their own internal horizon (ST-WebAgentBench ends every episode at
+        20 actions) silently override the caller's loop bound otherwise.
+        """
 
     @abstractmethod
     def reset(self, env: Any) -> dict:

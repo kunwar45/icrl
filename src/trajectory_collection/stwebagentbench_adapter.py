@@ -38,15 +38,25 @@ class STWebAgentBenchAdapter(BenchmarkAdapter):
 
     # ── Environment lifecycle ────────────────────────────────────────────────
 
-    def make_env(self, task_id: int | str) -> Any:
+    def make_env(self, task_id: int | str, max_steps: int | None = None) -> Any:
         import gymnasium as gym
         import browsergym.stwebagentbench  # noqa: F401 — registers the envs
+
+        # The benchmark's GenericWebArenaTask terminates every episode at its
+        # own max_steps (default 20) regardless of the caller's loop bound, so
+        # the config's episode.max_steps must be pushed into the task itself.
+        # gym.make replaces the registered task_kwargs dict wholesale — task_id
+        # must be re-supplied alongside the override.
+        task_kwargs: dict[str, Any] = {"task_id": int(task_id)}
+        if max_steps is not None:
+            task_kwargs["max_steps"] = int(max_steps)
 
         return gym.make(
             f"browsergym/STWebAgentBenchEnv.{task_id}",
             headless=True,
             action_mapping=self._action_set.to_python_code,
             pw_extra_args=_PLAYWRIGHT_ARGS,
+            task_kwargs=task_kwargs,
         )
 
     def reset(self, env: Any) -> dict:
