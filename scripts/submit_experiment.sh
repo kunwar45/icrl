@@ -1,4 +1,6 @@
 #!/bin/bash
+# ABOUTME: Builds and submits the sbatch command for run_experiment_job.sh, passing cluster resources on the CLI
+# ABOUTME: Run: ICRL_ACCOUNT=<alloc> ICRL_GPU=<type:n> bash scripts/submit_experiment.sh; PROFILE/RUN_NAME/DRY_RUN also apply
 # ============================================================================
 # submit_experiment.sh — build the sbatch command for THIS cluster and submit
 # ============================================================================
@@ -6,11 +8,11 @@
 # #SBATCH directives are literal text: they cannot read environment variables,
 # so a script with `--account=def-s2ganapa` baked in only ever works on one
 # cluster with one allocation. This wrapper passes those flags on the sbatch
-# command line, where they override the directives in slurm/run_experiment.sh.
+# command line, where they override the directives in scripts/slurm/run_experiment_job.sh.
 #
 # ── Usage ───────────────────────────────────────────────────────────────────
 #
-#   bash scripts/cluster_probe.sh              # discover the values first
+#   bash scripts/discover_cluster_resources.sh              # discover the values first
 #   export ICRL_ACCOUNT=aip-s2ganapa
 #   export ICRL_GPU=l40s:1
 #
@@ -51,7 +53,7 @@ if [ -z "${ICRL_ACCOUNT:-}" ]; then
 ERROR: ICRL_ACCOUNT is not set.
 
 Find your allocation:
-    bash scripts/cluster_probe.sh        # lists the accounts you can charge
+    bash scripts/discover_cluster_resources.sh        # lists the accounts you can charge
     sshare -U -u $USER                   # or ask slurm directly
 
 Then:
@@ -155,7 +157,7 @@ echo "profile   : ${PROFILE}   run_name: ${RUN_NAME}"
 echo "HF_HOME   : ${HF_HOME}  (offline=${HF_HUB_OFFLINE})"
 echo "extra     : ${EXTRA}"
 echo
-echo "sbatch ${SBATCH_ARGS[*]} slurm/run_experiment.sh"
+echo "sbatch ${SBATCH_ARGS[*]} scripts/slurm/run_experiment_job.sh"
 
 if [ "${DRY_RUN:-0}" = "1" ]; then
     echo
@@ -164,7 +166,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
 fi
 
 # --export=ALL so PROFILE / RUN_NAME / EXTRA / HF_* reach the job script.
-JOB=$(sbatch --parsable --export=ALL "${SBATCH_ARGS[@]}" slurm/run_experiment.sh)
+JOB=$(sbatch --parsable --export=ALL "${SBATCH_ARGS[@]}" scripts/slurm/run_experiment_job.sh)
 echo
 echo "submitted: job ${JOB}"
 echo "  squeue -u ${USER} -j ${JOB}"

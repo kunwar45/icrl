@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 # ABOUTME: THE entrypoint for trajectory data collection. The config fully defines the run.
-# ABOUTME: Run: python scripts/collect_trajectories.py --config configs/data_collection/stwebagentbench_expert.yaml [--smoke]
+# ABOUTME: Run: python scripts/collect_trajectories.py --config configs/trajectory_collection/stwebagentbench_expert.yaml [--smoke]
 """
-Thin CLI over src/data_collection. Variants (expert vs unsafe, new benchmark,
-new model, prompt ablation) are configs in configs/data_collection/ — never new
+Thin CLI over src/trajectory_collection. Variants (expert vs unsafe, new benchmark,
+new model, prompt ablation) are configs in configs/trajectory_collection/ — never new
 scripts.
 
     python scripts/collect_trajectories.py \
-        --config configs/data_collection/stwebagentbench_expert.yaml
+        --config configs/trajectory_collection/stwebagentbench_expert.yaml
     ... --smoke                          # tiny slice, full wiring, laptop-safe
     ... --override episode.max_retries=3 --override "benchmark.task_ids=[235]"
     ... --dry-run                        # print resolved config, run nothing
 
 On the cluster, use the SLURM wrapper instead (starts vLLM first):
-    CONFIG=configs/data_collection/stwebagentbench_expert.yaml \
-        sbatch slurm/collect_trajectories_job.sh
+    CONFIG=configs/trajectory_collection/stwebagentbench_expert.yaml \
+        sbatch scripts/slurm/collect_trajectories_job.sh
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", required=True,
-                    help="path to a configs/data_collection/*.yaml run config")
+                    help="path to a configs/trajectory_collection/*.yaml run config")
     ap.add_argument("--smoke", action="store_true",
                     help="merge the config's smoke: block — tiny slice, full wiring")
     ap.add_argument("--override", action="append", default=[],
@@ -63,7 +63,7 @@ def main() -> int:
         print(json.dumps(cfg, indent=2))
         return 0
 
-    from src.data_collection import run_collection
+    from src.trajectory_collection import run_collection
     outcome = run_collection(cfg)
 
     print(f"\nkept {outcome['kept']} / {outcome['episodes']} episodes → "

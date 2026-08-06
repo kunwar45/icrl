@@ -1,4 +1,6 @@
-from src.data.trajectory import Trajectory, Step, save_trajectories, load_trajectories
+# ABOUTME: Unit tests for src/trajectory_data/trajectory.py — Trajectory/Step to_text, JSONL and dict round-trips.
+# ABOUTME: Run: pytest tests/test_trajectory.py
+from src.trajectory_data.trajectory import Trajectory, Step, save_trajectories, load_trajectories
 import tempfile, os
 
 

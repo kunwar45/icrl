@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
+# ABOUTME: Trains the constraint function C_theta via ICRL, contrasting expert vs unsafe demo trajectories
+# ABOUTME: Run: python scripts/train_constraint.py +icrl_dual_training=constraint_default +compute=local run_name=...
 """
 Block A: Train C_θ via ICRL.
 
 Offline mode (default): uses the *train* split of pre-collected demos.
   - Expert demos : <data_root>/train/safe.jsonl
   - Policy demos : <data_root>/train/unsafe.jsonl
-Produce those with `python scripts/make_splits.py`; the held-out split is what
-scripts/eval_constraint.py scores, so the gate check stays honest.
+Produce those with `python scripts/make_demo_splits.py`; the held-out split is what
+scripts/evaluate_constraint.py scores, so the gate check stays honest.
 
 Online mode: pass a rollout_fn to collect fresh policy trajectories each
 iteration (wire up run_episode() when the PPO loop is connected).
 
 Usage:
-    python scripts/make_splits.py
-    python scripts/train_constraint.py +constraint=icrl_default +compute=local \
+    python scripts/make_demo_splits.py
+    python scripts/train_constraint.py +icrl_dual_training=constraint_default +compute=local \
         run_name=constraint_v1
 
     # Smaller encoder for local testing on M1:
-    python scripts/train_constraint.py +constraint=icrl_default +compute=local \
+    python scripts/train_constraint.py +icrl_dual_training=constraint_default +compute=local \
         run_name=constraint_v1 constraint.encoder.model_name=Qwen/Qwen2.5-1.5B \
         constraint.encoder.max_length=512 constraint.training.batch_size=4
 
-    # Reuse embeddings from scripts/encode_trajectories.py (skips the backbone):
-    python scripts/train_constraint.py +constraint=icrl_default +compute=local \
+    # Reuse embeddings from scripts/embed_trajectories.py (skips the backbone):
+    python scripts/train_constraint.py +icrl_dual_training=constraint_default +compute=local \
         run_name=constraint_v1 \
         constraint.encoder.safe_embeddings_path=embeddings/safe.pt \
         constraint.encoder.unsafe_embeddings_path=embeddings/unsafe.pt
@@ -40,24 +42,24 @@ import torch
 import hydra
 from omegaconf import DictConfig
 
-from src.constraint.encoder import TrajectoryEncoder, save_constraint_head
-from src.constraint.trainer import ICRLTrainer
-from src.constraint.evaluator import ConstraintEvaluator
-from src.data.trajectory import load_trajectories
-from src.models.loader import load_model_and_tokenizer
-from src.utils.compute import seed_everything, setup_accelerator
+from src.trajectory_embedding.trajectory_encoder import TrajectoryEncoder, save_constraint_head
+from src.icrl_dual_training.constraint_trainer import ICRLTrainer
+from src.icrl_dual_training.constraint_evaluator import ConstraintEvaluator
+from src.trajectory_data.trajectory import load_trajectories
+from src.models.model_loader import load_model_and_tokenizer
+from src.utils.device_setup import seed_everything, setup_accelerator
 from src.utils.logging import quiet_third_party_logs
 from src.utils.config import resolve_paths, data_path, constraint_head_path
 
 
 def _load_embeddings(path, expected_label: str):
-    """Load an encode_trajectories.py bundle and return its (N, H) tensor."""
+    """Load an embed_trajectories.py bundle and return its (N, H) tensor."""
     if not path:
         return None
     if not os.path.exists(path):
         raise FileNotFoundError(
             f"Embedding bundle not found: {path}\n"
-            f"Build it with: python scripts/encode_trajectories.py "
+            f"Build it with: python scripts/embed_trajectories.py "
             f"--jsonl <demos.jsonl> --label {expected_label} --output {path}"
         )
     bundle = torch.load(path, weights_only=False)
@@ -81,7 +83,7 @@ def main(cfg: DictConfig):
     policy_path = data_path(cfg, cfg.data.train_unsafe)
     for p in (expert_path, policy_path):
         if not os.path.exists(p):
-            print(f"Missing {p}. Run: python scripts/make_splits.py", file=sys.stderr)
+            print(f"Missing {p}. Run: python scripts/make_demo_splits.py", file=sys.stderr)
             sys.exit(1)
 
     expert_trajs = load_trajectories(expert_path)
@@ -128,7 +130,7 @@ def main(cfg: DictConfig):
 
     trained = trainer.train(n_iterations=cfg.constraint.training.n_iterations)
 
-    # ── Train-set metrics (not the gate — see eval_constraint.py) ─────────────
+    # ── Train-set metrics (not the gate — see evaluate_constraint.py) ─────────────
     evaluator = ConstraintEvaluator(trained)
     if expert_embs is not None and policy_embs is not None:
         # Identical numbers without a second pass over the frozen backbone.
@@ -154,7 +156,7 @@ def main(cfg: DictConfig):
     print(f"Train metrics saved: {metrics_path}")
 
     # The real gate runs on the held-out split:
-    #   python scripts/eval_constraint.py ... run_name=<same run_name>
+    #   python scripts/evaluate_constraint.py ... run_name=<same run_name>
     if metrics["auroc"] < cfg.constraint.evaluation.auroc_gate:
         print(f"NOTE: train AUROC {metrics['auroc']:.3f} is below the "
               f"{cfg.constraint.evaluation.auroc_gate} gate — the held-out gate "

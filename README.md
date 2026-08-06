@@ -18,17 +18,15 @@ python scripts/run_experiment.py --profile cluster   # the real thing
 
 | # | Stage | Script | What it produces |
 |---|-------|--------|------------------|
-| # | Stage | Script | What it produces |
-|---|-------|--------|------------------|
-| 0 | `preflight` | `preflight.py` | fails in seconds on a broken environment |
-| 1 | `splits` | `make_splits.py` | `<data>/train/*.jsonl`, `<data>/eval/*_held_out.jsonl` |
-| 2 | `encode` | `encode_trajectories.py` | `<data>/embeddings/<run>/{safe,unsafe}.pt` |
+| 0 | `preflight` | `run_preflight_checks.py` | fails in seconds on a broken environment |
+| 1 | `splits` | `make_demo_splits.py` | `<data>/train/*.jsonl`, `<data>/eval/*_held_out.jsonl` |
+| 2 | `encode` | `embed_trajectories.py` | `<data>/embeddings/<run>/{safe,unsafe}.pt` |
 | 3 | `constraint` | `train_constraint.py` | `<ckpt>/<run>/constraint_head.pt` |
-| 4 | `gate` | `eval_constraint.py` | `<ckpt>/<run>/held_out_metrics.json` (AUROC gate) |
-| 5 | `eval_base` | `eval_finetune.py` | CuP of the **untuned** policy |
-| 6 | `finetune` | `run_finetune.py` | `<ckpt>/<run>/final` (LoRA adapter) |
-| 7 | `eval_tuned` | `eval_finetune.py` | CuP of the **tuned** policy |
-| 8 | `plots` | `make_plots.py` | figures + `report.html` |
+| 4 | `gate` | `evaluate_constraint.py` | `<ckpt>/<run>/held_out_metrics.json` (AUROC gate) |
+| 5 | `eval_base` | `evaluate_policy.py` | CuP of the **untuned** policy |
+| 6 | `finetune` | `finetune_policy.py` | `<ckpt>/<run>/final` (LoRA adapter) |
+| 7 | `eval_tuned` | `evaluate_policy.py` | CuP of the **tuned** policy |
+| 8 | `plots` | `make_experiment_plots.py` | figures + `report.html` |
 
 Paths come from the compute group (`local` → repo-relative; `carleton` → `$SCRATCH/icrl`), overridable with `--data-root` / `--checkpoint-dir` / `--log-dir`.
 
@@ -61,10 +59,10 @@ scp cluster:~/icrl/logs/icrl_cluster/plots/report.html .   # then just open it
 Regenerate figures at any time without re-running the experiment:
 
 ```bash
-python scripts/make_plots.py --run-name icrl_cluster --pdf
+python scripts/make_experiment_plots.py --run-name icrl_cluster --pdf
 ```
 
-On the cluster: `sbatch slurm/run_experiment.sh` (env vars `PROFILE`, `RUN_NAME`, `STAGES`, `STRICT_GATE`, `EXTRA`).
+On the cluster: `sbatch scripts/slurm/run_experiment_job.sh` (env vars `PROFILE`, `RUN_NAME`, `STAGES`, `STRICT_GATE`, `EXTRA`).
 
 ### Profiles
 
@@ -76,7 +74,7 @@ On the cluster: `sbatch slurm/run_experiment.sh` (env vars `PROFILE`, `RUN_NAME`
 
 CuP is always measured on tasks the policy did not train on. The policy is 7B rather than the 72B used for demo collection because it has to fit a LoRA fine-tune plus its rollouts on the job's GPUs.
 
-`mock` is `src/data/mock_env.py`: a deterministic text CRM that emits the same
+`mock` is `src/environments/mock_environment.py`: a deterministic text CRM that emits the same
 `info["safety_report"]` contract as the benchmark, so fine-tuning and CuP
 evaluation run without SuiteCRM, Playwright or a GPU. It is a test fixture, not
 a benchmark — never report numbers from it.
@@ -109,7 +107,7 @@ per source, so this shows up before training rather than after.
 ### Running without the browser
 
 ```bash
-pytest tests/test_pipeline_e2e.py -q
+pytest tests/test_pipeline_end_to_end.py -q
 ```
 
 Pins the CuP measurement to scripted policies: confirm-then-delete scores CuP=1,
@@ -130,7 +128,7 @@ directives are literal text and cannot read environment variables).
 
 ```bash
 # 0. Discover what THIS cluster offers — accounts, GPU types, modules, quota
-bash scripts/cluster_probe.sh
+bash scripts/discover_cluster_resources.sh
 export ICRL_ACCOUNT=aip-...        # from the output
 export ICRL_GPU=l40s:1             # or h100:1 — from the output
 # If your allocation has no usable /scratch:
@@ -142,7 +140,7 @@ bash scripts/setup_cluster.sh
 cp .env.example .env && $EDITOR .env
 
 # 2. Prefetch models — LOGIN NODE ONLY (compute nodes have no internet)
-source scripts/session_start.sh
+source scripts/start_session.sh
 python scripts/prefetch_models.py --profile cluster
 
 # 3. Front half: no browser, no CRM, no SuiteCRM needed
@@ -174,7 +172,7 @@ this, and preflight fails with the exact prefetch command if a model is missing.
 `.env` must set `WA_SUITECRM`, **and also `GITLAB` and `SHOPPING_ADMIN`** —
 ST-WebAgentBench validates every site URL when it loads and refuses to start if
 any is missing, even for SuiteCRM-only tasks. Point them at SuiteCRM if you have
-no other instances; nothing in the easy tier dereferences them. `slurm/env.sh`
+no other instances; nothing in the easy tier dereferences them. `scripts/slurm/job_environment.sh`
 exports `.env` to every stage.
 
 ---
@@ -222,7 +220,7 @@ We maintain **forks** with small compatibility patches. Never push directly to u
 > export SCRATCH=/project/aip-s2ganapa/$USER
 > export ICRL_ROOT=/project/aip-s2ganapa/$USER/icrl
 > ```
-> Do this once per session (or add to `~/.bashrc`) *before* `source scripts/session_start.sh`
+> Do this once per session (or add to `~/.bashrc`) *before* `source scripts/start_session.sh`
 > — otherwise it looks for the repo/venv at `~/icrl` and `/scratch/$USER/...` and fails with
 > `No such file or directory`.
 
@@ -289,7 +287,7 @@ source /scratch/$USER/venvs/icrl_v4/bin/activate_icrl.sh
 cd ~/icrl
 ```
 
-Or, simpler, from the repo root: `source scripts/session_start.sh` — it does the module load,
+Or, simpler, from the repo root: `source scripts/start_session.sh` — it does the module load,
 venv activate, `PYTHONPATH` export, and a SuiteCRM reachability check in one step (respects
 `SCRATCH`/`ICRL_ROOT` overrides from the note above).
 
@@ -300,7 +298,7 @@ venv activate, `PYTHONPATH` export, and a SuiteCRM reachability check in one ste
 | `ICRL_ROOT` | `~/icrl` |
 | `STWEBAGENT_ROOT` | `$REPOS_ROOT/ST-WebAgentBench` |
 | `BROWSERGYM_ROOT` | `$REPOS_ROOT/BrowserGym` |
-| `PYTHONPATH` | `icrl/gridworld` + `icrl/src` |
+| `PYTHONPATH` | `icrl` + `icrl/src/gridworld` |
 
 ---
 
@@ -328,7 +326,7 @@ WA_SUITECRM=http://login3:8080/public
 
 > Replace `login3` with the hostname of the login node where SuiteCRM runs (`hostname` on that node).
 
-SLURM jobs load `~/icrl/.env` automatically (`slurm/env.sh` exports it to every stage). With `WA_SUITECRM` set, jobs connect directly to your login-node SuiteCRM instance.
+SLURM jobs load `~/icrl/.env` automatically (`scripts/slurm/job_environment.sh` exports it to every stage). With `WA_SUITECRM` set, jobs connect directly to your login-node SuiteCRM instance.
 
 ---
 
@@ -483,18 +481,18 @@ python -c "from icrl.envs.stwebagent import STWebAgentEnv; print('OK')"
 
 # No browser or GPU needed — resolved config only
 python scripts/collect_trajectories.py \
-  --config configs/data_collection/stwebagentbench_expert.yaml --dry-run
+  --config configs/trajectory_collection/stwebagentbench_expert.yaml --dry-run
 
 # Live smoke collection (SuiteCRM must be reachable; OpenRouter backend)
 python scripts/collect_trajectories.py \
-  --config configs/data_collection/stwebagentbench_expert.yaml --smoke
+  --config configs/trajectory_collection/stwebagentbench_expert.yaml --smoke
 ```
 
 ---
 
 ## Step 5 — Submit SLURM jobs
 
-All `slurm/*.sh` scripts use account `def-s2ganapa` and write logs to `logs/slurm/`. Edit `#SBATCH --account=` in each script if your allocation differs.
+All `scripts/slurm/*.sh` scripts use account `def-s2ganapa` and write logs to `logs/slurm/`. Edit `#SBATCH --account=` in each script if your allocation differs.
 
 ```bash
 cd ~/icrl
@@ -519,25 +517,25 @@ curl -sf http://login3:8080/public -o /dev/null && echo "CRM OK" || echo "CRM DO
 Validates imports, `.env`, and the resolved config without starting vLLM:
 
 ```bash
-DRY_RUN=1 CONFIG=configs/data_collection/stwebagentbench_expert.yaml \
-  sbatch --gres= --mem=4G --time=00:10:00 slurm/collect_trajectories_job.sh
+DRY_RUN=1 CONFIG=configs/trajectory_collection/stwebagentbench_expert.yaml \
+  sbatch --gres= --mem=4G --time=00:10:00 scripts/slurm/collect_trajectories_job.sh
 tail -f logs/slurm/icrl-collect-trajectories_*.out
 ```
 
 ### 5b. Trajectory collection
 
 One wrapper for every collection run — the config defines benchmark, tasks,
-model, prompt, and keep rule (see `docs/data-collection.md`). GPU count on the
+model, prompt, and keep rule (see `docs/trajectory-collection.md`). GPU count on the
 sbatch line must match the config's `model.tensor_parallel`.
 
 ```bash
 # Expert: Qwen-72B + policy prompt, keep only CuP=1 (4× GPU, tensor-parallel=4)
-CONFIG=configs/data_collection/stwebagentbench_expert.yaml \
-  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 slurm/collect_trajectories_job.sh
+CONFIG=configs/trajectory_collection/stwebagentbench_expert.yaml \
+  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 scripts/slurm/collect_trajectories_job.sh
 
 # Unsafe: Qwen-7B, no safety prompt, keep any violating episode (1× GPU)
-CONFIG=configs/data_collection/stwebagentbench_unsafe.yaml \
-  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:1 slurm/collect_trajectories_job.sh
+CONFIG=configs/trajectory_collection/stwebagentbench_unsafe.yaml \
+  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:1 scripts/slurm/collect_trajectories_job.sh
 
 # Subset without editing the config:
 OVERRIDES="benchmark.task_ids=[235,236,237]" CONFIG=... sbatch ...
@@ -550,12 +548,12 @@ plus `manifest.json` (resolved config) and `summary.csv` per directory.
 
 | Script | GPUs | Purpose |
 |--------|------|---------|
-| `slurm/embed_trajectories.sh` | 1 | Embed collected trajectories |
-| `slurm/constraint_job.sh` | 1 | Train constraint encoder |
-| `slurm/finetune_job.sh` | 2 | Fine-tune orchestrator |
-| `slurm/cot_dataset_job.sh` | 1 | Build CoT dataset |
-| `slurm/cot_finetune_job.sh` | 2 | CoT fine-tuning |
-| `slurm/array_sweep.sh` | 2 × 9 | Hyperparameter sweep |
+| `scripts/slurm/embed_trajectories_job.sh` | 1 | Embed collected trajectories |
+| `scripts/slurm/train_constraint_job.sh` | 1 | Train constraint encoder |
+| `scripts/slurm/finetune_policy_job.sh` | 2 | Fine-tune orchestrator |
+| `scripts/slurm/build_chain_of_thought_dataset_job.sh` | 1 | Build CoT dataset |
+| `scripts/slurm/finetune_chain_of_thought_policy_job.sh` | 2 | CoT fine-tuning |
+| `scripts/slurm/finetune_policy_array_job.sh` | 2 × 9 | Hyperparameter sweep |
 
 ### Monitor jobs
 
@@ -619,7 +617,7 @@ scancel JOBID
 | `typing_extensions` import errors | `pip install "typing_extensions>=4.13.0" --force-reinstall --no-deps` |
 | 0 ST-WebAgent tasks registered | Re-run `setup_cluster.sh`; check `stwebagentbench.pth` in site-packages |
 | `ModuleNotFoundError: icrl` | `source activate_icrl.sh` to set `PYTHONPATH` |
-| `~/icrl/scripts/session_start.sh: No such file or directory` | Repo/venv live under `/project/...` on this account, not `~/icrl` and `/scratch/$USER`. `cd` into the actual repo dir and export `SCRATCH`/`ICRL_ROOT` first — see the `/scratch` vs `/project` note near the top. |
+| `~/icrl/scripts/start_session.sh: No such file or directory` | Repo/venv live under `/project/...` on this account, not `~/icrl` and `/scratch/$USER`. `cd` into the actual repo dir and export `SCRATCH`/`ICRL_ROOT` first — see the `/scratch` vs `/project` note near the top. |
 
 ### Logs
 
@@ -640,7 +638,7 @@ tail -f logs/slurm/vllm_*.log
 For development off-cluster, use Docker Compose:
 
 ```bash
-bash scripts/start_suitecrm.sh
+bash scripts/start_suitecrm_docker.sh
 # first boot — load demo data:
 docker exec -i suitecrm_setup-mariadb-1 \
   mysql -u bn_suitecrm -pbitnami123 bitnami_suitecrm \
@@ -688,11 +686,12 @@ git fetch upstream && git merge upstream/main && git push fork main
 ~/ST-WebAgentBench/             fork of segev-shlomov/ST-WebAgentBench
 
 icrl/
-  src/                          constraint encoder, Lagrangian PPO, data pipeline
-  gridworld/                    gridworld ICRL reference
-  configs/                      Hydra configs (compute/carleton.yaml)
+  src/                          pipeline-stage packages (see CLAUDE.md)
+  src/gridworld/                gridworld ICRL reference implementation
+  configs/                      Hydra configs, one directory per pipeline stage
   scripts/                      entry points, setup_cluster.sh, start_suitecrm_apptainer.sh
-  slurm/                        SLURM job templates + env.sh
+  scripts/slurm/                SLURM job templates + job_environment.sh
+  scratch/                      one-off / throwaway scripts, not part of the pipeline
 ```
 
 ### Requirements files
@@ -700,7 +699,7 @@ icrl/
 | File | Use |
 |------|-----|
 | `requirements.txt` | Full install (ML + browser + vLLM) |
-| `requirements_no_agentlab.txt` | Lighter install without agentlab/gradio/ray |
+| `requirements-no-agentlab.txt` | Lighter install without agentlab/gradio/ray |
 | `requirements-browser.txt` | BrowserGym + ST-WebAgentBench deps only |
 
 ---
@@ -708,8 +707,8 @@ icrl/
 ## Tests
 
 ```bash
-export PYTHONPATH=gridworld:src
-pytest gridworld/tests/unit/ -q
+export PYTHONPATH=.:src/gridworld
+pytest src/gridworld/tests/unit/ -q
 pytest tests/ --ignore=tests/test_reasoning_trace.py -q
 ```
 
@@ -737,14 +736,14 @@ bash scripts/start_suitecrm_apptainer.sh   # starts + waits until HTTP 200
 echo "WA_SUITECRM=http://$(hostname):8080/public" >> ~/icrl/.env
 
 # === EVERY SESSION ===
-source scripts/session_start.sh   # or manually:
+source scripts/start_session.sh   # or manually:
 source /scratch/$USER/venvs/icrl_v4/bin/activate
 source /scratch/$USER/venvs/icrl_v4/bin/activate_icrl.sh
 cd ~/icrl
 
 # === RUN COLLECTION ===
 mkdir -p logs/slurm
-OVERRIDES="benchmark.task_ids=[235,236]" CONFIG=configs/data_collection/stwebagentbench_expert.yaml \
-  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 slurm/collect_trajectories_job.sh
+OVERRIDES="benchmark.task_ids=[235,236]" CONFIG=configs/trajectory_collection/stwebagentbench_expert.yaml \
+  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 scripts/slurm/collect_trajectories_job.sh
 tail -f logs/slurm/icrl-gen_*.out
 ```

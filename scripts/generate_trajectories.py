@@ -14,7 +14,7 @@ planner/executor, prompt ablations) are configs in configs/trajectory_generation
 
 On the cluster, use the SLURM wrapper instead (starts the vLLM servers first):
     CONFIG=configs/trajectory_generation/stwebagentbench_expert.yaml \
-        sbatch slurm/generate_trajectories_job.sh
+        sbatch scripts/slurm/generate_trajectories_job.sh
 """
 from __future__ import annotations
 

@@ -1,10 +1,12 @@
+# ABOUTME: Unit tests for src/trajectory_data/reasoning_trace.py — ReasoningTrace to_text, JSONL round-trip, CausalScorer.
+# ABOUTME: Run: pytest tests/test_reasoning_trace.py
 import os
 import tempfile
 from unittest.mock import MagicMock
 
 import torch
 
-from src.data.reasoning_trace import (
+from src.trajectory_data.reasoning_trace import (
     CausalScorer,
     ReasoningStep,
     ReasoningTrace,

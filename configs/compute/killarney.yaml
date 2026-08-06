@@ -1,8 +1,10 @@
 # @package _global_
+# ABOUTME: Hydra compute group: Killarney (Alliance/Compute Canada AI cluster) backend — 1 GPU, $SCRATCH paths.
+# ABOUTME: Used by: any Hydra stage script with +compute=killarney, e.g. python scripts/train_constraint.py +compute=killarney
 # Killarney (Alliance / Compute Canada AI cluster).
 # NOTE: must be `_global_`, not `_global_.compute` — see local.yaml.
 #
-# Paths follow $SCRATCH, which submit_experiment.sh and slurm/env.sh both
+# Paths follow $SCRATCH, which submit_experiment.sh and scripts/slurm/job_environment.sh both
 # default to /scratch/$USER. On allocations without a usable /scratch quota
 # export SCRATCH=/project/<alloc>/$USER before submitting and everything follows.
 compute:

@@ -22,9 +22,9 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.data_collection.benchmark_adapter import BenchmarkAdapter, get_adapter
-from src.data_collection.collection_runner import KEEP_RULES, _next_trace_n
-from src.data_collection.episode_runner import run_episode
+from src.trajectory_collection.benchmark_adapter import BenchmarkAdapter, get_adapter
+from src.trajectory_collection.collection_runner import KEEP_RULES, _next_trace_n
+from src.trajectory_collection.episode_runner import run_episode
 from src.trajectory_generation.plan_generator import (build_failure_report,
                                                       diversify_plan,
                                                       plan_similarity,

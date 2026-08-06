@@ -1,3 +1,5 @@
+# ABOUTME: Root Hydra config with defaults shared by every pipeline stage (paths, data splits, compute, wandb).
+# ABOUTME: Loaded by every scripts/*.py Hydra entrypoint via config_name="base"; groups merged with +compute=... etc.
 project_name: icrl-safety
 run_name: ???
 seed: 42
@@ -20,7 +22,7 @@ paths:
   log_dir: logs/
   benchmark_root: ${oc.env:STWEBAGENT_ROOT,""}
 
-# Demo splits produced by scripts/make_splits.py, relative to paths.data_root.
+# Demo splits produced by scripts/make_demo_splits.py, relative to paths.data_root.
 # Training reads the train split; the gate check reads the held-out split.
 data:
   train_safe: train/safe.jsonl

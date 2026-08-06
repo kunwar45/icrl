@@ -1,3 +1,5 @@
+# ABOUTME: Hydra config helpers: env-var path expansion/creation, data_path, run_dir and constraint head location.
+# ABOUTME: Called by every scripts/ entrypoint right after Hydra composes the run config.
 """Config loading + path resolution for Hydra configs."""
 from omegaconf import DictConfig, OmegaConf
 import os

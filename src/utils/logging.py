@@ -1,3 +1,5 @@
+# ABOUTME: Logging helpers: get_logger, third-party log silencing, and MetricsLogger (W&B plus local JSONL).
+# ABOUTME: Used by trainers and scripts across all pipeline stages for run metrics and console output.
 """Single logging interface — W&B if enabled, always writes local JSONL."""
 import logging
 import json

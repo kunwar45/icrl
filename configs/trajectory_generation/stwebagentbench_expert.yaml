@@ -1,5 +1,5 @@
 # ABOUTME: Synthetic expert-trajectory generation on ST-WebAgentBench: 72B plans with a
-# ABOUTME: diversity gate, 72B executes, ground truth verifies. Run: CONFIG=configs/trajectory_generation/stwebagentbench_expert.yaml sbatch slurm/generate_trajectories_job.sh
+# ABOUTME: diversity gate, 72B executes, ground truth verifies. Run: CONFIG=configs/trajectory_generation/stwebagentbench_expert.yaml sbatch scripts/slurm/generate_trajectories_job.sh
 
 # Run identity — recorded in every trace and the manifest.
 generation: stwebagentbench_expert

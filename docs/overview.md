@@ -21,18 +21,18 @@ policies, kept only when it succeeds with zero violations) and *unsafe* demos
 (a weak model with the safety prompt removed — its violations are the signal).
 Train a constraint head C_θ over trajectory embeddings so expert trajectories
 score below an anchor β and unsafe/policy trajectories score above it
-(`src/constraint/trainer.py`). Verify C_θ generalizes via AUROC on held-out
+(`src/icrl_dual_training/constraint_trainer.py`). Verify C_θ generalizes via AUROC on held-out
 tasks. Then fine-tune the policy with **Lagrangian constrained PPO** — this is
 *not* RLHF: there is no preference data and no learned reward model. Task
 reward R is the benchmark's own success signal (kept deliberately separate so
-safety opinions don't leak into R — see `src/finetune/reward.py`), and the
+safety opinions don't leak into R — see `src/lagrangian_finetuning/reward_model.py`), and the
 objective is
 
 ```
 maximize  R(τ) − λ · C_θ(τ)
 ```
 
-with λ adapted by dual ascent (`src/finetune/dual.py`) to keep expected
+with λ adapted by dual ascent (`src/lagrangian_finetuning/dual_variable.py`) to keep expected
 constraint cost under a budget ε. The policy is trained as a LoRA adapter.
 
 ## Pipeline stages
@@ -41,15 +41,15 @@ One driver runs everything: `python scripts/run_experiment.py --profile <p>`.
 
 | # | Stage | Script | What it does |
 |---|-------|--------|--------------|
-| 0 | `preflight` | `preflight.py` | Fail fast on a broken env; report demo-source quality (count, distinct tasks, clean terminations) |
-| 1 | `splits` | `make_splits.py` | Split demos into train / held-out **by task ID**, so the gate never sees training tasks |
-| 2 | `encode` | `encode_trajectories.py` | Embed each trajectory (`safe.pt`, `unsafe.pt`) |
+| 0 | `preflight` | `run_preflight_checks.py` | Fail fast on a broken env; report demo-source quality (count, distinct tasks, clean terminations) |
+| 1 | `splits` | `make_demo_splits.py` | Split demos into train / held-out **by task ID**, so the gate never sees training tasks |
+| 2 | `encode` | `embed_trajectories.py` | Embed each trajectory (`safe.pt`, `unsafe.pt`) |
 | 3 | `constraint` | `train_constraint.py` | Train C_θ: expert scores anchored below β, policy/unsafe scores pushed high |
-| 4 | `gate` | `eval_constraint.py` | AUROC on held-out tasks — if C_θ can't separate safe from unsafe on unseen tasks, fine-tuning against it is meaningless (`--strict-gate` stops the run) |
-| 5 | `eval_base` | `eval_finetune.py` | CuP of the **untuned** policy (baseline) |
-| 6 | `finetune` | `run_finetune.py` | Lagrangian PPO with LoRA (`src/finetune/lagrangian.py`) |
-| 7 | `eval_tuned` | `eval_finetune.py` | CuP of the **tuned** policy |
-| 8 | `plots` | `make_plots.py` | Figures + self-contained `report.html` |
+| 4 | `gate` | `evaluate_constraint.py` | AUROC on held-out tasks — if C_θ can't separate safe from unsafe on unseen tasks, fine-tuning against it is meaningless (`--strict-gate` stops the run) |
+| 5 | `eval_base` | `evaluate_policy.py` | CuP of the **untuned** policy (baseline) |
+| 6 | `finetune` | `finetune_policy.py` | Lagrangian PPO with LoRA (`src/lagrangian_finetuning/lagrangian_ppo_trainer.py`) |
+| 7 | `eval_tuned` | `evaluate_policy.py` | CuP of the **tuned** policy |
+| 8 | `plots` | `make_experiment_plots.py` | Figures + self-contained `report.html` |
 
 The headline metric is **CuP (Completion under Policy)**: the task succeeded
 AND zero policies were violated, always measured on tasks the policy did not
@@ -61,7 +61,7 @@ could not show that.
 
 - **The constraint needs both classes.** Safe demos alone cannot define the
   boundary; C_θ is learned by contrast against unsafe rollouts. See
-  [data-collection.md](data-collection.md) for how both sets are collected.
+  [trajectory-collection.md](trajectory-collection.md) for how both sets are collected.
 - **R and C are deliberately separate.** R measures *did the agent do the job*
   (benchmark ground truth, plus a small step penalty and truncation penalty);
   C measures *did it do the job safely*. An LLM judge for R would blur the
@@ -77,7 +77,7 @@ could not show that.
 
 The policy is 7B (not the 72B used for demo collection) because it must fit a
 LoRA fine-tune plus its own rollouts on the job's GPUs. `mock`
-(`src/data/mock_env.py`) is a deterministic text CRM emitting the same
+(`src/environments/mock_environment.py`) is a deterministic text CRM emitting the same
 `safety_report` contract as the benchmark — a test fixture, never a source of
 reportable numbers.
 
@@ -85,11 +85,11 @@ reportable numbers.
 
 ```
 scripts/run_experiment.py     the driver (all stages)
-src/constraint/               trajectory encoder + C_θ trainer
-src/finetune/                 reward model, Lagrangian PPO, dual ascent, rollouts
-src/data/                     Trajectory dataclass, trace loaders, mock env
-slurm/                        cluster job templates (collection, training, sweep)
-gridworld/                    gridworld ICRL reference implementation
+src/icrl_dual_training/               trajectory encoder + C_θ trainer
+src/lagrangian_finetuning/                 reward model, Lagrangian PPO, dual ascent, rollouts
+src/trajectory_data/                     Trajectory dataclass, trace loaders, mock env
+scripts/slurm/                        cluster job templates (collection, training, sweep)
+src/gridworld/                    gridworld ICRL reference implementation
 ```
 
 Cluster setup, SuiteCRM/Apptainer, and SLURM specifics are covered in the

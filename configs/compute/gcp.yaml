@@ -1,4 +1,6 @@
 # @package _global_
+# ABOUTME: Hydra compute group: GCP VM backend — 4 GPUs, data/checkpoints under /mnt/disks/data.
+# ABOUTME: Used by: any Hydra stage script with +compute=gcp, e.g. python scripts/train_constraint.py +compute=gcp
 # NOTE: must be `_global_`, not `_global_.compute` — see local.yaml.
 compute:
   backend: gcp

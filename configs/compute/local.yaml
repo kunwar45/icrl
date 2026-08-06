@@ -1,4 +1,6 @@
 # @package _global_
+# ABOUTME: Hydra compute group: local laptop backend — 1 GPU, repo-relative data/checkpoint/log paths.
+# ABOUTME: Used by: any Hydra stage script with +compute=local, e.g. python scripts/train_constraint.py +compute=local
 # NOTE: this must be `_global_`, not `_global_.compute`. With the latter the
 # `paths:` block below lands at `compute.paths` and the overrides are silently
 # ignored — `cfg.paths` keeps the base.yaml values.

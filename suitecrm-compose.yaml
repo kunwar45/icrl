@@ -1,3 +1,5 @@
+# ABOUTME: Docker Compose file that boots SuiteCRM 8 + MariaDB (bitnamilegacy images) on localhost:8080.
+# ABOUTME: Used by: scripts/start_suitecrm_docker.sh (local dev only; the cluster uses Apptainer instead).
 # Local compose for SuiteCRM.
 # public.ecr.aws/bitnami/* was removed 2026-06-10; use bitnamilegacy on Docker Hub.
 services:

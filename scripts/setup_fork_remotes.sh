@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# ABOUTME: Configures upstream + fork git remotes for the BrowserGym and ST-WebAgentBench dependency repos
+# ABOUTME: Run: GITHUB_USER=<you> REPOS_ROOT=$HOME bash scripts/setup_fork_remotes.sh (fork the repos on GitHub first)
 # Configure upstream + fork remotes for third-party dependency repos.
 #
 # Prerequisite: fork these repos on GitHub first (one-time, in the browser):

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# ABOUTME: One-time Alliance cluster setup: modules, venv, BrowserGym + ST-WebAgentBench clones, Playwright
+# ABOUTME: Run on the login node: GITHUB_USER=<you> bash scripts/setup_cluster.sh (see header for overrides)
 # One-time cluster setup for icrl + BrowserGym + ST-WebAgentBench.
 #
 # Tested on Compute Canada / Alliance clusters (module python/3.12).
@@ -19,7 +21,7 @@ GITHUB_USER="${GITHUB_USER:-}"
 REPOS_ROOT="${REPOS_ROOT:-$HOME}"
 ICRL_ROOT="${ICRL_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 # Follow $SCRATCH so allocations without a usable /scratch quota work by
-# exporting SCRATCH=/project/<alloc>/$USER — same default as slurm/env.sh.
+# exporting SCRATCH=/project/<alloc>/$USER — same default as scripts/slurm/job_environment.sh.
 SCRATCH="${SCRATCH:-/scratch/${USER}}"
 VENV_PATH="${VENV_PATH:-${SCRATCH}/venvs/icrl_v4}"
 BROWSERGYM_ROOT="${REPOS_ROOT}/BrowserGym"
@@ -139,14 +141,14 @@ export ICRL_ROOT="${ICRL_ROOT}"
 export REPOS_ROOT="${REPOS_ROOT}"
 export STWEBAGENT_ROOT="${STWEB_ROOT}"
 export BROWSERGYM_ROOT="${BROWSERGYM_ROOT}"
-export PYTHONPATH="\${ICRL_ROOT}/gridworld:\${ICRL_ROOT}/src:\${PYTHONPATH:-}"
+export PYTHONPATH="\${ICRL_ROOT}/src/gridworld:\${ICRL_ROOT}/src:\${PYTHONPATH:-}"
 EOF
 log "Wrote ${ACTIVATE_SNIPPET}"
 log "After activating the venv, also run: source ${ACTIVATE_SNIPPET}"
 
 # ── 11. Verify ──────────────────────────────────────────────────────────────────
 log "Verifying imports..."
-export PYTHONPATH="${ICRL_ROOT}/gridworld:${ICRL_ROOT}/src"
+export PYTHONPATH="${ICRL_ROOT}/src/gridworld:${ICRL_ROOT}/src"
 python -c "
 import browsergym.stwebagentbench, gymnasium as gym
 n = len([e for e in gym.envs.registry if 'STWebAgent' in e])
@@ -162,5 +164,5 @@ log "Next steps:"
 log "  1. Edit ${ICRL_ROOT}/.env (API keys)"
 log "  2. Edit ${STWEB_ROOT}/.env (WA_SUITECRM=http://...)"
 log "  3. source ${VENV_PATH}/bin/activate && source ${ACTIVATE_SNIPPET}"
-log "  4. python ${ICRL_ROOT}/scripts/collect_trajectories.py --config configs/data_collection/stwebagentbench_expert.yaml --dry-run"
+log "  4. python ${ICRL_ROOT}/scripts/collect_trajectories.py --config configs/trajectory_collection/stwebagentbench_expert.yaml --dry-run"
 log "  5. For live browser on cluster: bash scripts/start_suitecrm_apptainer.sh --wait, set WA_SUITECRM in .env"

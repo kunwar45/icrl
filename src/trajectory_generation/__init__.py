@@ -20,7 +20,7 @@ it, only because the ground-truth evaluators scored the real rollout. What gets
 saved is the executed episode (real observations), with the plan attached as
 provenance.
 
-Benchmark-agnostic via the same BenchmarkAdapter seam as src/data_collection.
+Benchmark-agnostic via the same BenchmarkAdapter seam as src/trajectory_collection.
 """
 from src.trajectory_generation.generation_runner import run_generation
 

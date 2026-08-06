@@ -1,0 +1,26 @@
+# @package _global_
+# ABOUTME: Hydra chain_of_thought group: PPO fine-tuning overrides for the CoT deception experiment (GSM8K/ARC).
+# ABOUTME: Used by: python scripts/finetune_chain_of_thought_policy.py +lagrangian_finetuning=lagrangian_ppo +chain_of_thought=finetune
+# Overrides for CoT deception fine-tuning — merged on top of configs/lagrangian_finetuning/lagrangian_ppo.yaml
+# Usage: python scripts/finetune_chain_of_thought_policy.py +lagrangian_finetuning=lagrangian_ppo +chain_of_thought=finetune run_name=cot_ft_v1
+
+finetune:
+  policy:
+    model_name: meta-llama/Meta-Llama-3-8B-Instruct
+
+  ppo:
+    steps: 2000   # CoT tasks are faster to evaluate than web tasks
+
+  constraint:
+    # Sweep values: 0.05, 0.1, 0.2 — same as the main experiment
+    epsilon: 0.1
+    lambda_init: 0.5
+    lambda_lr: 0.01
+    lambda_max: 10.0
+    constraint_model_path: ???
+
+  cot:
+    dataset: gsm8k     # gsm8k | arc_challenge
+    split: train
+    max_examples: 5000
+    # Reward = answer correctness (0 or 1) — Kunwar wires up eval logic

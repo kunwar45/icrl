@@ -10,7 +10,7 @@ constraint function C_θ by contrasting expert (safe) and unsafe trajectories, t
 fine-tune a policy with Lagrangian PPO to maximize task reward subject to C_θ.
 Initial benchmark: ST-WebAgentBench (others later — nothing benchmark-specific may
 live outside an adapter or a config). See `docs/overview.md` and
-`docs/data-collection.md`.
+`docs/trajectory-collection.md`.
 
 ## Naming conventions (STRICT)
 
@@ -19,32 +19,37 @@ path must know what the file does. No abbreviations, no jargon-only names, no
 `utils2.py`, no `new_`, `final_`, `_v2`, `tmp`, `misc`.
 
 - **Scripts** (`scripts/`): `<verb>_<object>[_<qualifier>].py`, stage-explicit.
-  `collect_trajectories.py`, `encode_trajectories.py`, `train_constraint.py`.
+  `collect_trajectories.py`, `embed_trajectories.py`, `train_constraint.py`.
   One entrypoint per stage; variants are **configs, not new scripts**.
-- **SLURM templates** (`slurm/`): `<script_it_runs>_job.sh` — the name of the
-  script it wraps plus `_job.sh`. `collect_trajectories_job.sh` runs
-  `collect_trajectories.py`. Nothing else goes in `slurm/`.
-- **Configs** (`configs/<area>/`): `<benchmark_or_target>_<variant>.yaml`, e.g.
-  `configs/data_collection/stwebagentbench_expert.yaml`. The config name is the
-  run's identity — it appears in output paths and manifests verbatim.
-- **Source modules** (`src/<package>/`): named for what they contain, singular
-  purpose: `src/data_collection/collection_runner.py`. A benchmark adapter is
-  always `<benchmark>_adapter.py`.
-- **"Collection" vs "generation"**: *data collection* (`src/data_collection`)
-  rolls out agents in a real environment and keeps episodes the ground-truth
-  evaluators label. *Trajectory generation* (`src/trajectory_generation`)
-  synthesizes an optimal plan, executes it with the policy model, and keeps
-  only ground-truth-verified episodes. Both share the `BenchmarkAdapter` seam;
-  never blur the two words.
+- **SLURM templates** (`scripts/slurm/`): `<script_it_runs>_job.sh` — the name
+  of the script it wraps plus `_job.sh`. `collect_trajectories_job.sh` runs
+  `collect_trajectories.py`. Nothing else goes in `scripts/slurm/`.
+- **Configs** (`configs/<stage>/`): `<benchmark_or_target>_<variant>.yaml`, e.g.
+  `configs/trajectory_collection/stwebagentbench_expert.yaml`. The config name
+  is the run's identity — it appears in output paths and manifests verbatim.
+  Config directories are named after the `src/` stage package they configure.
+- **Source modules** (`src/<package>/`): one package per pipeline stage, named
+  for the stage (see Structure below): `src/trajectory_collection/collection_runner.py`.
+  A benchmark adapter is always `<benchmark>_adapter.py`.
+- **"Collection" vs "generation"**: *trajectory collection*
+  (`src/trajectory_collection`) rolls out agents in a real environment and keeps
+  episodes the ground-truth evaluators label. *Trajectory generation*
+  (`src/trajectory_generation`) synthesizes an optimal plan, executes it with
+  the policy model, and keeps only ground-truth-verified episodes. Both share
+  the `BenchmarkAdapter` seam; never blur the two words.
 - **Data outputs**: `$SCRATCH/trajectories/<benchmark>/<set>/task_<id>_trace_<n>.json`
   plus `manifest.json` + `summary.csv` in the same directory. Sets are named
   `expert`, `unsafe`, `expert_synthetic` — never `safe`/`good`/`bad`. Synthetic
   traces are never silently mixed into `expert`.
 - **HF datasets**: `<namespace>/<YYYY-MM-DD>-<benchmark>-<set>`, dated by
   generation. Never push undated or unverified data (see Data policy).
-- **Docs** (`docs/`): lowercase-kebab, named for the topic: `data-collection.md`.
-- **Every Python/YAML/shell file** starts with a 2-line `# ABOUTME:` header
-  saying what it is and how to run/use it.
+- **Docs** (`docs/`): lowercase-kebab, named for the topic: `trajectory-collection.md`.
+- **Every Python/YAML/shell file** starts with a 2-line `# ABOUTME:` header:
+  line 1 says what the file is, line 2 how to run/use it. The header follows
+  the shebang or `# @package` directive when one exists, and is required even
+  in `__init__.py`. **Enforced mechanically** by
+  `tests/test_aboutme_headers.py` — the suite fails on any tracked file
+  missing it, so a new file without a header cannot land quietly.
 
 When touching an old file that violates these rules, rename it as part of the
 change (git mv, update references) rather than propagating the old name.
@@ -80,12 +85,21 @@ stages.
 ## Structure
 
 ```
-src/          reusable code, imported as src.* (collect engine, constraint, finetune, data)
-scripts/      one thin CLI per pipeline stage
-configs/      YAML per variant; the config fully defines the run
-slurm/        SLURM wrappers, one per script
-docs/         canonical docs (overview, data-collection, LOG)
-gridworld/    gridworld ICRL reference implementation
+src/                        reusable code, imported as src.*, one package per pipeline stage:
+  trajectory_collection/      roll out agents in a real env, keep evaluator-labelled episodes
+  trajectory_generation/      synthesize plans, execute with the policy, keep verified episodes
+  trajectory_embedding/       frozen-backbone trajectory encoder C_θ = encoder + MLP head
+  icrl_dual_training/         ICRL alternating constraint/policy training of C_θ + evaluation
+  lagrangian_finetuning/      Lagrangian PPO fine-tuning of the LLM policy (dual λ, reward, rollout)
+  environments/               ST-WebAgentBench interface + deterministic mock env
+  trajectory_data/            trajectory/action schema, trace loaders, safety verifier
+  models/, utils/             shared model loading, config/logging/compute helpers
+  gridworld/                  gridworld ICRL reference implementation (own configs/scripts/tests)
+scripts/                    one thin CLI per pipeline stage
+scripts/slurm/              SLURM wrappers, one per script, plus shared job_environment.sh
+configs/                    YAML per variant, one directory per stage; the config fully defines the run
+scratch/                    one-off and throwaway scripts — never imported by src/ or scripts/
+docs/                       canonical docs (overview, data-collection, LOG)
 ```
 
 Never run `git add`/`commit` — the user commits their own changes.

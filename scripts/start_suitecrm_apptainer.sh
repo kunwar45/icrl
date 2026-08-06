@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# ABOUTME: Starts MariaDB + SuiteCRM as Apptainer instances on the login node so SLURM jobs reach them via WA_SUITECRM
+# ABOUTME: Run: bash scripts/start_suitecrm_apptainer.sh [--stop|--status|--rebuild-sandbox|--fresh-install]
 # Starts MariaDB + SuiteCRM as Apptainer instances on the login node.
 #
 # Intended for Alliance / Compute Canada clusters: start once on the login node

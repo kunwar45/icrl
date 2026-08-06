@@ -1,3 +1,5 @@
+# ABOUTME: LLM client factories (OpenRouter, local HF pipeline, vLLM server) behind one chat.completions interface.
+# ABOUTME: Used by the safety verifier and any stage needing judge/generation calls on laptop or SLURM.
 """
 LLM client factories.
 

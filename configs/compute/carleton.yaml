@@ -1,4 +1,6 @@
 # @package _global_
+# ABOUTME: Hydra compute group: Carleton SLURM cluster backend — 2 GPUs, $SCRATCH-based data/checkpoint paths.
+# ABOUTME: Used by: any Hydra stage script with +compute=carleton, e.g. python scripts/train_constraint.py +compute=carleton
 # NOTE: must be `_global_`, not `_global_.compute` — see local.yaml.
 compute:
   backend: carleton

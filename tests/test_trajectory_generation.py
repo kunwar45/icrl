@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.data_collection.benchmark_adapter import BenchmarkAdapter
+from src.trajectory_collection.benchmark_adapter import BenchmarkAdapter
 from src.trajectory_generation.generation_runner import run_generation
 from src.trajectory_generation.plan_generator import build_failure_report
 

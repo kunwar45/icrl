@@ -52,7 +52,6 @@ logs/slurm/
 # Experiment run artifacts (scripts/run_experiment.py)
 logs/*/
 logs/*_experiment.json
-data/splits.json
 
 # Trajectory data (generated, large)
 trajectories/
@@ -68,11 +67,8 @@ runs/
 *.pth
 *.ckpt
 
-# Data (keep structure, ignore large/generated files)
-data/**/*.jsonl
-data/**/*.parquet
-data/**/*.pkl
-data/**/*.pickle
+# Runtime data directory (demo splits etc. — recreated by scripts, never tracked)
+data/
 
 # OS
 .DS_Store

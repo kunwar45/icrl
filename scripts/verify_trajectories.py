@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ABOUTME: Verifies saved safe trajectories: spot-checks CuP/reward/violations, yield rates, common failure dims
+# ABOUTME: Run: python scripts/verify_trajectories.py [--traj-dir trajectories/safe --spot-check 5]
 """
 Phase 3 verification for saved safe trajectories.
 

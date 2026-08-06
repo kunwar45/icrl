@@ -1,6 +1,6 @@
 # Trajectory generation — synthetic expert trajectories
 
-The parallel alternative to [data collection](data-collection.md): instead of
+The parallel alternative to [data collection](trajectory-collection.md): instead of
 hoping a strong model stumbles into CuP=1 rollouts, **synthesize what an
 optimal trajectory should be, execute it, and let the benchmark's ground-truth
 evaluators verify it**. This is synthetic data generation for SFT: a staged
@@ -36,11 +36,11 @@ configs/trajectory_generation/<run>.yaml              fully defines a run, promp
 src/trajectory_generation/
   plan_generator.py                                   propose / refine / revise + failure report
   generation_runner.py                                per-task loop: plan → execute → verify → revise
-slurm/generate_trajectories_job.sh                    starts 1–2 vLLM servers, then generates
+scripts/slurm/generate_trajectories_job.sh                    starts 1–2 vLLM servers, then generates
 ```
 
 Generality comes from reusing the **same `BenchmarkAdapter` seam** as
-collection (`src/data_collection/benchmark_adapter.py`): a new eval needs one
+collection (`src/trajectory_collection/benchmark_adapter.py`): a new eval needs one
 adapter (which both pipelines then share) plus configs. The plan-guided episode
 reuses `episode_runner.run_episode` — the plan is injected as an extra prompt
 field, so all the episode robustness (loop hints, duplicate-message blocking)
@@ -58,11 +58,11 @@ server; the wrapper splits `CUDA_VISIBLE_DEVICES` and starts both.
 ```bash
 # Default (one shared 72B server, 4 GPUs):
 CONFIG=configs/trajectory_generation/stwebagentbench_expert.yaml \
-  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 slurm/generate_trajectories_job.sh
+  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 scripts/slurm/generate_trajectories_job.sh
 
 # In-distribution 7B executor instead (5 GPUs, two servers):
 OVERRIDES="models.executor.name=Qwen/Qwen2.5-7B-Instruct models.executor.vllm_url=http://localhost:8001/v1 models.executor.tensor_parallel=1" \
-  CONFIG=... sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:5 slurm/generate_trajectories_job.sh
+  CONFIG=... sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:5 scripts/slurm/generate_trajectories_job.sh
 
 # Laptop smoke (OpenRouter backends, 1 task, output under data/smoke/):
 python scripts/generate_trajectories.py \

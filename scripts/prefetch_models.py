@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ABOUTME: Downloads every HuggingFace model a run needs into $HF_HOME so offline compute nodes can load them
+# ABOUTME: Run on the login node: python scripts/prefetch_models.py --profile cluster [--check] or --models <names>
 """
 Download every model the run needs, on a node that has internet.
 
