@@ -25,12 +25,27 @@ class BenchmarkAdapter(ABC):
     # ── Environment lifecycle ────────────────────────────────────────────────
 
     @abstractmethod
-    def make_env(self, task_id: int | str, max_steps: int | None = None) -> Any:
+    def make_env(self, task_id: int | str, max_steps: int | None = None,
+                 end_on_score: bool | None = None,
+                 slow_mo_ms: int | None = None) -> Any:
         """
-        Build (but do not reset) the environment for one task. max_steps, when
-        given, must bound the episode inside the environment itself — benchmarks
-        with their own internal horizon (ST-WebAgentBench ends every episode at
-        20 actions) silently override the caller's loop bound otherwise.
+        Build (but do not reset) the environment for one task.
+
+        max_steps, when given, must bound the episode inside the environment
+        itself — benchmarks with their own internal horizon (ST-WebAgentBench
+        ends every episode at 20 actions) silently override the caller's loop
+        bound otherwise.
+
+        end_on_score=False asks the environment NOT to end the episode merely
+        because its task evaluator went positive. Benchmarks that score by
+        looking for text on the current page otherwise cut the episode off at the
+        first navigation whenever a seeded record already shows the expected
+        word, leaving the agent no chance to do the work or send a
+        policy-mandated message.
+
+        slow_mo_ms, when given, overrides the delay the driver inserts before
+        every browser action. Benchmarks ship conservative values (1000ms here)
+        that dominate wall-clock without changing outcomes.
         """
 
     @abstractmethod
@@ -67,6 +82,52 @@ class BenchmarkAdapter(ABC):
     @abstractmethod
     def task_ids(self) -> list[int | str]:
         """The task set this run collects over, from the config."""
+
+    # ── Concurrency safety ───────────────────────────────────────────────────
+
+    def state_collision_group(self, task_id: int | str) -> str:
+        """
+        Name the shared environment state this task's ground-truth check reads.
+
+        Runs that prove completion by inspecting shared state
+        (`verification.require_persisted_state`) may only overlap two episodes
+        when their groups differ — otherwise one episode's writes land inside
+        the other's before/after comparison and both verdicts are fiction.
+
+        The default assumes tasks are independent of each other but that a task
+        contends with itself, which is the weakest claim that is always true.
+        An adapter whose tasks share records MUST override this; getting it
+        wrong shows up as verified traces that are quietly unattributable.
+        """
+        return f"task:{task_id}"
+
+    # ── Persistence ground truth ─────────────────────────────────────────────
+
+    def settle(self, env: Any, seconds: float) -> None:
+        """
+        Give the environment time to finish committing the episode's last write
+        before its persisted state is inspected. The default sleeps; adapters
+        over a browser should also wait for in-flight requests to finish.
+        """
+        import time
+        time.sleep(seconds)
+
+    def verify_persisted_state(self, task_id: int | str) -> tuple[bool, str]:
+        """
+        Prove the episode's changes actually persisted, independent of the page
+        the agent left behind. Benchmarks whose task evaluators read the agent's
+        live DOM cannot distinguish "saved" from "typed into a form and
+        abandoned", so a run that requires this (verification
+        .require_persisted_state) asks the backing store instead.
+
+        Returns (persisted_ok, human readable detail). Adapters that cannot
+        offer this must not override it: the default refuses loudly rather than
+        letting unverified episodes count as verified.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} cannot verify persisted state; either "
+            "implement verify_persisted_state or turn off "
+            "verification.require_persisted_state for this run")
 
     def task_metadata(self, task_id: int | str) -> dict[str, str]:
         """

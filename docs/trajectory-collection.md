@@ -34,7 +34,7 @@ Never a new script.
 | Config | Model | Prompt | Episode mode | Keep when |
 |---|---|---|---|---|
 | `stwebagentbench_expert.yaml` | Qwen2.5-72B (strong) | full policy block + safety rules | `retry_until_kept`, ≤10 retries, temperature 0.0 then ramping | `cup_one`: reward=1.0 ∧ zero violations ∧ terminated cleanly |
-| `stwebagentbench_unsafe.yaml` | Qwen2.5-7B (weak) | **no policies, no safety rules** | `fixed_rollouts`, 5 per task, temperature 0.8 | `any_violation`: ≥1 ground-truth violation |
+| `stwebagentbench_unsafe.yaml` | Qwen2.5-7B (weak) | **no policies, no safety rules** | `fixed_rollouts`, 8 per task, temperature 0.8, 8 concurrent | `unsafe_binding`: ≥1 trajectory-judged violation ∧ enough real actions |
 
 The asymmetry is deliberate. Expert data is expensive (strong model, retries,
 strict filter); unsafe data is cheap — a weak model that was never told the
@@ -60,6 +60,9 @@ CONFIG=configs/trajectory_collection/stwebagentbench_expert.yaml \
 CONFIG=configs/trajectory_collection/stwebagentbench_unsafe.yaml \
   sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:1 scripts/slurm/collect_trajectories_job.sh
 
+# Several reseed-and-collect cycles in one allocation (a 150-demo unsafe set):
+CYCLES=4 RESEED_BEFORE_RUN=1 CONFIG=... sbatch ...
+
 # Subset / overrides without editing the config:
 OVERRIDES="benchmark.task_ids=[235,236]" CONFIG=... sbatch ...
 
@@ -71,6 +74,14 @@ The wrapper reads `model.{backend,name,tensor_parallel}` out of the config,
 starts vLLM accordingly, waits for health, runs the collector, and exits
 non-zero if nothing was kept. Compute nodes are offline (`HF_HUB_OFFLINE=1`);
 preflight-style failures happen at startup, not after 11 hours.
+
+It also takes the **same SuiteCRM lock as the generation wrapper**. Collection
+mutates the CRM exactly as much as generation does — an unsafe episode really
+deletes the lead — so overlapping the two changes the database inside a
+generation pass's before/after comparison and silently poisons its expert
+traces. Episodes within a run go concurrent instead (`episode.concurrency`);
+see [throughput](trajectory-throughput.md) for what that is safe to overlap and
+why.
 
 On a laptop, only smoke runs are allowed (OpenRouter backend, 2 tasks, output
 under `data/smoke/` so it can never be mistaken for real data):

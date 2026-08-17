@@ -78,6 +78,84 @@ if [ -f "${ICRL_REPO}/.env" ]; then
     set +a
 fi
 
+# ── SuiteCRM shard selection ──────────────────────────────────────────────────
+# Throughput against ONE SuiteCRM is capped by the app, not by GPUs: every pass
+# that proves completion from the database needs the database to itself. Running
+# K independent SuiteCRM+MariaDB instances (scripts/start_suitecrm_shards.sh)
+# lifts that cap, and a job joins one by number.
+#
+# This MUST come after .env is sourced: .env carries the single-instance
+# WA_SUITECRM and the shard file has to win. It is also why sharding is a
+# per-PROCESS setting — the benchmark copies WA_SUITECRM into SUITECRM and its
+# env_config module caches that value at first import, so one process can only
+# ever talk to one instance.
+ICRL_SUITECRM_SHARD="${ICRL_SUITECRM_SHARD:-}"
+if [ -n "${ICRL_SUITECRM_SHARD}" ]; then
+    ICRL_SHARD_ENV="${SCRATCH}/suitecrm_shards/shard_${ICRL_SUITECRM_SHARD}.env"
+    if [ ! -f "${ICRL_SHARD_ENV}" ]; then
+        echo "ERROR: no shard file at ${ICRL_SHARD_ENV}" >&2
+        echo "       Start the shards first, on the login node:" >&2
+        echo "       bash scripts/start_suitecrm_shards.sh --shards N" >&2
+        return 1 2>/dev/null || exit 1
+    fi
+    set -a
+    # shellcheck disable=SC1090
+    . "${ICRL_SHARD_ENV}"
+    set +a
+    echo "suitecrm: shard ${ICRL_SUITECRM_SHARD} → ${WA_SUITECRM}"
+fi
+export ICRL_SUITECRM_SHARD
+
+# ── Mutual exclusion against the shared web app ───────────────────────────────
+# A pass that reseeds SuiteCRM and then attributes database state to its own
+# episodes cannot share that instance with anything else. Two passes at once
+# truncate each other's records mid-episode and produce traces that look fine
+# and prove nothing. The lock is per SHARD, so K shards give K concurrent
+# passes while still serialising within each.
+#
+# mkdir is atomic over NFS and never blocks. `flock -w` was tried and does NOT
+# fail fast on this /scratch (observed blocking >10 min), which idles a GPU
+# allocation and stalls every afterany-dependent pass behind it. Fast-fail also
+# means the same chain can be submitted to several partitions and whichever
+# starts first does the work.
+ICRL_SUITECRM_LOCK="${ICRL_SUITECRM_LOCK:-${SCRATCH}/locks/suitecrm${ICRL_SUITECRM_SHARD:+_shard_${ICRL_SUITECRM_SHARD}}.lockdir}"
+
+# Bash keeps ONE EXIT trap, so everything that must be cleaned up goes through
+# this single handler. (A second `trap ... EXIT` silently replaces the first —
+# that is how the lock directory used to survive a job and wedge every later
+# pass into exiting immediately.)
+ICRL_CLEANUP_PIDS=()
+icrl_cleanup() {
+    for _pid in "${ICRL_CLEANUP_PIDS[@]:-}"; do kill "${_pid}" 2>/dev/null || true; done
+    [ -n "${ICRL_LOCK_HELD:-}" ] && rm -rf "${ICRL_SUITECRM_LOCK}"
+    return 0
+}
+
+icrl_take_suitecrm_lock() {
+    mkdir -p "$(dirname "${ICRL_SUITECRM_LOCK}")"
+    if mkdir "${ICRL_SUITECRM_LOCK}" 2>/dev/null; then
+        echo "${SLURM_JOB_ID:-local}" > "${ICRL_SUITECRM_LOCK}/owner"
+        ICRL_LOCK_HELD=1
+        trap icrl_cleanup EXIT
+        return 0
+    fi
+    # Held — but by a job that still exists? A pass killed before its trap ran
+    # would otherwise wedge every later pass into exiting immediately.
+    local owner
+    owner="$(cat "${ICRL_SUITECRM_LOCK}/owner" 2>/dev/null || true)"
+    if [ -n "${owner}" ] && ! squeue -h -j "${owner}" -o %i 2>/dev/null | grep -q .; then
+        echo "[$(date)] lock owned by job ${owner}, which is gone — reclaiming"
+        rm -rf "${ICRL_SUITECRM_LOCK}"
+        if mkdir "${ICRL_SUITECRM_LOCK}" 2>/dev/null; then
+            echo "${SLURM_JOB_ID:-local}" > "${ICRL_SUITECRM_LOCK}/owner"
+            ICRL_LOCK_HELD=1
+            trap icrl_cleanup EXIT
+            return 0
+        fi
+    fi
+    return 1
+}
+
 # Model weights on fast scratch, not NFS home. Compute nodes are offline, so the
 # cache must already be populated — see scripts/prefetch_models.py.
 export HF_HOME="${HF_HOME:-${SCRATCH}/hf_cache}"

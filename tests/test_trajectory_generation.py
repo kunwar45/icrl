@@ -23,7 +23,7 @@ class FakeAdapter(BenchmarkAdapter):
     """
     name = "fake"
 
-    def make_env(self, task_id, max_steps=None):
+    def make_env(self, task_id, max_steps=None, end_on_score=None, slow_mo_ms=None):
         return {"task_id": task_id, "step": 0, "outcome": None}
 
     def reset(self, env):
@@ -233,3 +233,145 @@ def test_exhausted_revisions_saves_nothing(tmp_path, monkeypatch):
     assert not list((tmp_path / "out").glob("task_*_trace_*.json"))
     summary = (tmp_path / "out" / "summary.csv").read_text()
     assert "exhausted revisions" in summary
+
+
+def test_executor_temperature_ramps_across_revisions(tmp_path, monkeypatch):
+    """Revision 0 must stay greedy (that is when the reliable tasks succeed) and
+    later revisions must warm up, or a deterministic executor replays the same
+    failing actions for all four attempts."""
+    from src.trajectory_collection.collection_runner import _temperature
+    schedule = {"first": 0.0, "base": 0.25, "step": 0.15, "max": 0.7}
+    temps = [_temperature(r, schedule) for r in range(4)]
+    assert temps[0] == 0.0, "first attempt follows the plan deterministically"
+    assert temps[1] > 0.0 and temps == sorted(temps)
+    assert max(temps) <= 0.7
+
+
+# ── Concurrency ───────────────────────────────────────────────────────────────
+# Tasks run in parallel so the vLLM server keeps batching while each episode
+# waits on its browser. Correctness comes from CHAINING, not from a low
+# concurrency number: tasks whose ground-truth checks read the same tables must
+# still run one at a time, or each one's writes land inside the other's
+# before/after comparison and both verdicts become fiction.
+
+class CollisionTrackingAdapter(FakeAdapter):
+    """Fake env that records which collision groups were ever in flight together."""
+    name = "fake"
+
+    def __init__(self, benchmark_cfg):
+        super().__init__(benchmark_cfg)
+        self.groups = benchmark_cfg["groups"]
+        self._lock = __import__("threading").Lock()
+        self._in_flight: dict = {}
+        self.max_in_flight_per_group: dict = {}
+        self.max_in_flight_total = 0
+
+    def state_collision_group(self, task_id):
+        return self.groups[task_id]
+
+    def task_metadata(self, task_id):
+        # The goal carries the task id so the planner can be deterministic
+        # regardless of the order threads happen to interleave in.
+        return {"goal": f"goal for task {task_id}",
+                "policies_block": "confirm before delete",
+                "action_space": "click/fill/answer"}
+
+    def make_env(self, task_id, max_steps=None, end_on_score=None, slow_mo_ms=None):
+        group = self.groups[task_id]
+        with self._lock:
+            self._in_flight[group] = self._in_flight.get(group, 0) + 1
+            self.max_in_flight_per_group[group] = max(
+                self.max_in_flight_per_group.get(group, 0), self._in_flight[group])
+            self.max_in_flight_total = max(self.max_in_flight_total,
+                                           sum(self._in_flight.values()))
+        import time
+        time.sleep(0.05)  # long enough for a real overlap to be observable
+        with self._lock:
+            self._in_flight[group] -= 1
+        return super().make_env(task_id, max_steps, end_on_score, slow_mo_ms)
+
+
+class PerTaskPlanner:
+    """Planner whose output depends only on the task, never on call order — so
+    the assertions hold however the threads interleave."""
+    def __init__(self):
+        import re
+
+        class _Completions:
+            @staticmethod
+            def create(messages=None, **kwargs):
+                user = messages[1]["content"]
+                task_id = re.search(r"goal for task (\d+)", user).group(1)
+                class _Msg: content = f"plan_for_task_{task_id}"
+                class _Choice: message = _Msg()
+                class _Resp: choices = [_Choice()]
+                return _Resp()
+        class _Chat: completions = _Completions()
+        self.chat = _Chat()
+
+
+def _run_concurrent(cfg, monkeypatch):
+    # Every planner stage must see {goal}, since PerTaskPlanner keys off the
+    # task id in it rather than on call order.
+    for stage in ("propose_plan", "refine_plan", "diversify_plan", "revise_plan"):
+        cfg["prompts"][stage] = {"system": "s", "user": "{goal}"}
+    adapter = CollisionTrackingAdapter(cfg["benchmark"])
+    monkeypatch.setattr("src.trajectory_generation.generation_runner.get_adapter",
+                        lambda bcfg: adapter)
+    clients = {"planner-model": PerTaskPlanner(), "executor-model": PlanEchoExecutor()}
+    monkeypatch.setattr("src.trajectory_generation.generation_runner._build_client",
+                        lambda mcfg: clients[mcfg["name"]])
+    return adapter, run_generation(cfg)
+
+
+def test_colliding_tasks_are_serialised_while_others_overlap(tmp_path, monkeypatch):
+    task_ids = [236, 246, 237, 247, 244]
+    groups = {236: "leads", 246: "leads",
+              237: "opportunities", 247: "opportunities", 244: "cases"}
+    script = {f"plan_for_task_{t}": {"reward": 1.0, "terminated": True,
+                                     "violations": []} for t in task_ids}
+
+    cfg = _cfg(tmp_path, script, task_ids=task_ids)
+    cfg["benchmark"]["groups"] = groups
+    cfg["generation_loop"]["concurrency"] = 5
+
+    adapter, outcome = _run_concurrent(cfg, monkeypatch)
+
+    assert outcome["kept"] == 5
+    # Never two episodes of one group at once...
+    assert max(adapter.max_in_flight_per_group.values()) == 1
+    # ...but the three independent groups really did overlap, or concurrency
+    # bought nothing at all.
+    assert adapter.max_in_flight_total > 1
+
+
+def test_concurrent_traces_do_not_overwrite_each_other(tmp_path, monkeypatch):
+    """Two threads keeping a trace at the same moment must not both compute the
+    same trace_n and have one silently clobber the other."""
+    task_ids = [1, 2, 3, 4, 5, 6]
+    script = {f"plan_for_task_{t}": {"reward": 1.0, "terminated": True,
+                                     "violations": []} for t in task_ids}
+
+    cfg = _cfg(tmp_path, script, task_ids=task_ids)
+    cfg["benchmark"]["groups"] = {t: f"group_{t}" for t in task_ids}
+    cfg["generation_loop"]["concurrency"] = 6
+
+    _adapter, outcome = _run_concurrent(cfg, monkeypatch)
+
+    assert outcome["kept"] == 6
+    assert len(list((tmp_path / "out").glob("task_*_trace_*.json"))) == 6
+
+
+def test_summary_rows_stay_in_task_order_under_concurrency(tmp_path, monkeypatch):
+    task_ids = [10, 20, 30]
+    script = {f"plan_for_task_{t}": {"reward": 1.0, "terminated": True,
+                                     "violations": []} for t in task_ids}
+
+    cfg = _cfg(tmp_path, script, task_ids=task_ids)
+    cfg["benchmark"]["groups"] = {t: f"group_{t}" for t in task_ids}
+    cfg["generation_loop"]["concurrency"] = 3
+
+    _adapter, _outcome = _run_concurrent(cfg, monkeypatch)
+
+    rows = (tmp_path / "out" / "summary.csv").read_text().splitlines()
+    assert [row.split(",")[0] for row in rows[1:]] == ["10", "20", "30"]

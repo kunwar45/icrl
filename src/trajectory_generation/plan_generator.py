@@ -116,6 +116,21 @@ def build_failure_report(result: dict) -> str:
                          f"{v.get('description', '')}: {v.get('reason', '')}")
     else:
         lines.append("policy violations: none")
+    # The task really was done — the plan just did not stop. Say so plainly,
+    # otherwise the planner reworks steps that already worked.
+    if result.get("state_verified") is True and not result.get("finished_deliberately"):
+        lines.append("database check — THE TASK WAS COMPLETED SUCCESSFULLY, but the "
+                     "episode kept acting until it ran out of steps. Keep the "
+                     "working steps and end the plan with answer() immediately "
+                     "after the goal is met; do not re-navigate afterwards.")
+    # The most actionable failure the planner can get: the page looked right but
+    # nothing was saved, so the plan is missing a Save/confirm step.
+    if result.get("state_verified") is False:
+        lines.append("database check — YOUR CHANGES DID NOT PERSIST:")
+        lines.extend(f"  {line}" for line in result.get("state_detail", "").splitlines())
+        lines.append("  Fix the plan so the record is actually committed: after "
+                     "filling fields, SAVE and confirm the save landed (the "
+                     "detail view shows the stored values, not your typing).")
     tail = [s["action"] for s in result["steps"][-8:]]
     if tail:
         lines.append("last actions executed:")

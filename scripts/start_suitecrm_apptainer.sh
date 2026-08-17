@@ -53,6 +53,13 @@ SUITECRM_SANDBOX="${SUITECRM_SANDBOX:-${_SCRATCH}/apptainer/suitecrm_sandbox}"
 SUITECRM_DATA="${SUITECRM_DATA:-${_SCRATCH}/suitecrm}"
 MARIADB_INSTANCE="${MARIADB_INSTANCE:-mariadb}"
 SUITECRM_INSTANCE="${SUITECRM_INSTANCE:-suitecrm}"
+# Apptainer instances share the host network namespace, so two MariaDBs cannot
+# both own 3306. Overriding this is what lets scripts/start_suitecrm_shards.sh
+# run several independent SuiteCRM stacks side by side.
+MARIADB_PORT="${MARIADB_PORT:-3306}"
+# Where the resolved URL is recorded. Shards each write their own file, which
+# scripts/slurm/job_environment.sh sources when ICRL_SUITECRM_SHARD is set.
+ICRL_WA_ENV_FILE="${ICRL_WA_ENV_FILE:-${_SCRATCH}/icrl_wa_env}"
 
 # Auto-select a free port if the caller didn't set one.
 # Scans 19080-19099 (high range, unlikely to collide with other users).
@@ -188,7 +195,7 @@ start_instances() {
     apptainer instance stop "${MARIADB_INSTANCE}" 2>/dev/null || true
     sleep 3  # give apptainer time to clean up instance files before re-creating
 
-    echo "Starting MariaDB instance (${MARIADB_SIF})..."
+    echo "Starting MariaDB instance (${MARIADB_SIF}) on port ${MARIADB_PORT}..."
     apptainer instance run \
         --writable-tmpfs \
         --bind "${SUITECRM_DATA}/mariadb:/bitnami/mariadb" \
@@ -196,12 +203,16 @@ start_instances() {
         --env MARIADB_USER=bn_suitecrm \
         --env MARIADB_DATABASE=bitnami_suitecrm \
         --env MARIADB_PASSWORD=bitnami123 \
+        --env MARIADB_PORT_NUMBER="${MARIADB_PORT}" \
         "${MARIADB_SIF}" "${MARIADB_INSTANCE}"
 
     echo "Waiting for MariaDB to accept connections (up to 120s)..."
     local _mdb_waited=0
+    # -h 127.0.0.1 forces TCP: the mysql client silently prefers a unix socket
+    # for "localhost" and would then ignore -P and test the wrong server.
     until apptainer exec instance://"${MARIADB_INSTANCE}" \
-        mysql -ubn_suitecrm -pbitnami123 bitnami_suitecrm -e "SELECT 1" > /dev/null 2>&1; do
+        mysql -h 127.0.0.1 -P "${MARIADB_PORT}" \
+        -ubn_suitecrm -pbitnami123 bitnami_suitecrm -e "SELECT 1" > /dev/null 2>&1; do
         sleep 5
         _mdb_waited=$((_mdb_waited + 5))
         echo "  MariaDB not ready yet (${_mdb_waited}s)..."
@@ -219,7 +230,7 @@ start_instances() {
         --env APACHE_HTTP_PORT_NUMBER="${SUITECRM_HTTP_PORT}" \
         --env APACHE_HTTPS_PORT_NUMBER="$((SUITECRM_HTTP_PORT + 1))" \
         --env SUITECRM_DATABASE_HOST=127.0.0.1 \
-        --env SUITECRM_DATABASE_PORT_NUMBER=3306 \
+        --env SUITECRM_DATABASE_PORT_NUMBER="${MARIADB_PORT}" \
         --env SUITECRM_DATABASE_USER=bn_suitecrm \
         --env SUITECRM_DATABASE_NAME=bitnami_suitecrm \
         --env SUITECRM_DATABASE_PASSWORD=bitnami123 \
@@ -298,10 +309,20 @@ wait_for_http() {
         fi
     done
     local final_url="http://$(hostname):${SUITECRM_HTTP_PORT}/public"
-    printf 'WA_SUITECRM=%s\n' "${final_url}" > "${_SCRATCH}/icrl_wa_env"
+    mkdir -p "$(dirname "${ICRL_WA_ENV_FILE}")"
+    # The database coordinates travel with the URL: a shard's state checks must
+    # reach ITS MariaDB, and stwebagentbench_state_verifier defaults the host to
+    # whatever WA_SUITECRM points at on port 3306 — right for the single
+    # instance, wrong for every shard but the first.
+    {
+        printf 'WA_SUITECRM=%s\n' "${final_url}"
+        printf 'ICRL_SUITECRM_DB_HOST=%s\n' "$(hostname)"
+        printf 'ICRL_SUITECRM_DB_PORT=%s\n' "${MARIADB_PORT}"
+    } > "${ICRL_WA_ENV_FILE}"
     echo "SuiteCRM is up at ${final_url}"
     echo "  WA_SUITECRM=${final_url}"
-    echo "  → saved to ${_SCRATCH}/icrl_wa_env"
+    echo "  database    ${MARIADB_PORT}"
+    echo "  → saved to ${ICRL_WA_ENV_FILE}"
 }
 
 case "${1:-}" in

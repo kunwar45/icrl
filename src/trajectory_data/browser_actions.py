@@ -119,6 +119,14 @@ def normalize_safety_report(report: dict) -> dict:
         "violated": bool(report.get("violated", False)),
         "dormant": bool(report.get("dormant", False)),
         "reason": report.get("reason", ""),
+        # How the verdict was reached decides how much to trust it. Evaluators
+        # that read the agent's final PAGE (is_program_html) share the fragility
+        # of the task evaluators — they miss a change the agent really made if it
+        # navigated away — whereas evaluators over the action sequence and its
+        # messages (is_ask_the_user, is_sequence_match, is_action_count, ...) are
+        # unaffected. Callers use this to decide which verdicts are load-bearing.
+        "eval_types": list((policy.get("eval") or report.get("eval") or {})
+                           .get("eval_types", []) or []),
     }
 
 

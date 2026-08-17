@@ -89,6 +89,26 @@ Each task gets at most `1 + generation_loop.max_plan_revisions` real-env
 executions (default 4). The job exits non-zero if nothing survived
 verification.
 
+## Throughput
+
+Tasks run concurrently (`generation_loop.concurrency`), chained so that two
+tasks whose database checks read the same tables never overlap — otherwise one
+episode's writes land inside the other's before/after comparison and both
+verdicts are fiction. The chains are derived from the checks' own SQL, so they
+cannot drift from what the checks query.
+
+A cycle yields **at most one trace per task**, because the keep rule is
+differential: once a task's goal state is reached, no later episode in that
+cycle can be credited with reaching it. So traces per cycle is bounded by the
+number of tasks that keep, and widening `TASK_STATE_CHECKS` is worth more than
+any speed lever. `CYCLES` + `RESEED_BEFORE_RUN=1` runs several reseed-and-
+generate rounds per allocation; `scripts/start_suitecrm_shards.sh` lets several
+allocations run at once.
+
+See [throughput](trajectory-throughput.md) for the full picture — lean
+observation extraction, prefix-cache-aware prompt ordering, connection pooling,
+and what was tried and rejected.
+
 ## Output
 
 `$SCRATCH/trajectories/<benchmark>/expert_synthetic/` — the **collection trace

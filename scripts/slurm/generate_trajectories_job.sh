@@ -24,7 +24,11 @@
 
 #SBATCH --job-name=icrl-generate-trajectories
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
+# Episodes run concurrently (generation_loop.concurrency), and each concurrent
+# episode is a headless Chromium plus Python-side axtree flattening — CPU, not
+# GPU, is what limits how many can be in flight. Keep this at roughly twice the
+# config's concurrency.
+#SBATCH --cpus-per-task=16
 #SBATCH --mem=96G
 #SBATCH --time=12:00:00
 #SBATCH --output=logs/slurm/%x_%j.out
@@ -42,6 +46,17 @@ OVERRIDES="${OVERRIDES:-}"
 mkdir -p logs/slurm
 
 export HF_HUB_OFFLINE=1
+
+# ── Mutual exclusion against the shared web app ──────────────────────────────
+# The lock, the shard resolution and the single EXIT handler all live in
+# job_environment.sh so the collection wrapper enforces exactly the same rule —
+# an unsafe collection pass mutating SuiteCRM underneath a generation pass
+# poisons its traces just as surely as a second generation pass would.
+if ! icrl_take_suitecrm_lock; then
+    echo "[$(date)] another pass holds ${ICRL_SUITECRM_LOCK} — exiting so it can finish"
+    exit 0
+fi
+echo "[$(date)] holding SuiteCRM lock ${ICRL_SUITECRM_LOCK}"
 
 # ── Read both model blocks out of the config ─────────────────────────────────
 read -r P_BACKEND P_MODEL P_TP P_URL E_BACKEND E_MODEL E_TP E_URL < <(python - "${CONFIG}" <<'PY'
@@ -78,6 +93,7 @@ start_vllm() {  # start_vllm <model> <tp> <url> <gpu_list> <tag>
         python -m vllm.entrypoints.openai.api_server \
         --model "${model}" --tensor-parallel-size "${tp}" \
         --port "${port}" --max-model-len 16384 \
+        --enable-prefix-caching \
         > "${log}" 2>&1 &
     echo $!
 }
@@ -100,25 +116,62 @@ wait_vllm() {  # wait_vllm <url> <pid> <tag>
     echo "[$(date)] vLLM(${tag}) ready after ${waited}s"
 }
 
-PIDS=()
 if [ "${P_BACKEND}" = "vllm" ]; then
     if [ "${E_BACKEND}" = "vllm" ] && { [ "${E_MODEL}" != "${P_MODEL}" ] || [ "${E_URL}" != "${P_URL}" ]; }; then
         # Two servers on disjoint GPU ranges: planner gets 0..P_TP-1, executor the rest.
         P_GPUS=$(seq -s, 0 $((P_TP - 1)))
         E_GPUS=$(seq -s, "${P_TP}" $((P_TP + E_TP - 1)))
-        P_PID=$(start_vllm "${P_MODEL}" "${P_TP}" "${P_URL}" "${P_GPUS}" planner);  PIDS+=("${P_PID}")
-        E_PID=$(start_vllm "${E_MODEL}" "${E_TP}" "${E_URL}" "${E_GPUS}" executor); PIDS+=("${E_PID}")
+        P_PID=$(start_vllm "${P_MODEL}" "${P_TP}" "${P_URL}" "${P_GPUS}" planner);  ICRL_CLEANUP_PIDS+=("${P_PID}")
+        E_PID=$(start_vllm "${E_MODEL}" "${E_TP}" "${E_URL}" "${E_GPUS}" executor); ICRL_CLEANUP_PIDS+=("${E_PID}")
         wait_vllm "${P_URL}" "${P_PID}" planner
         wait_vllm "${E_URL}" "${E_PID}" executor
     else
         # One shared server (same model+url, or executor not on vLLM).
         P_GPUS=$(seq -s, 0 $((P_TP - 1)))
-        P_PID=$(start_vllm "${P_MODEL}" "${P_TP}" "${P_URL}" "${P_GPUS}" planner); PIDS+=("${P_PID}")
+        P_PID=$(start_vllm "${P_MODEL}" "${P_TP}" "${P_URL}" "${P_GPUS}" planner); ICRL_CLEANUP_PIDS+=("${P_PID}")
         wait_vllm "${P_URL}" "${P_PID}" planner
     fi
-    trap 'for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done' EXIT
 fi
 
 # ── Generate ─────────────────────────────────────────────────────────────────
-python scripts/generate_trajectories.py --config "${CONFIG}" "${OVERRIDE_ARGS[@]}"
-echo "[$(date)] done."
+# RESEED_BEFORE_RUN=1 resets the demo data before each cycle: a trace is kept
+# only if the database shows the change AND did not already show it beforehand,
+# so a cycle over state left by the previous one can neither succeed nor fail
+# honestly (a delete has no target left; created records already exist). Safe
+# only because the lock above serialises passes — this wipes the demo records
+# any concurrent job would be reading.
+#
+# CYCLES reseed-and-generate rounds inside ONE job. Loading the 72B costs ~130s
+# and re-queueing costs minutes-to-hours, so a job that only does one pass spends
+# most of its life on startup. Traces accumulate as trace_0, trace_1, ... across
+# cycles, exactly as they would across separate jobs.
+#
+# A BARREN CYCLE MUST NOT KILL THE CHAIN. generate_trajectories.py exits
+# non-zero when a pass keeps nothing — deliberately, so a one-shot job is marked
+# failed rather than leaving an empty directory that looks finished. Under
+# `set -e` that turned the first barren cycle into the end of the run: job
+# 4806706 asked for 70 cycles, kept nothing in cycle 1, and died 35 minutes in
+# having produced no traces. Cycles are independent attempts over a freshly
+# reseeded database, and an empty one is an ordinary outcome, not an error.
+# The job still fails if EVERY cycle came up empty, which is the condition the
+# non-zero exit was actually there to signal.
+CYCLES_KEPT=0
+CYCLES_EMPTY=0
+for cycle in $(seq 1 "${CYCLES:-1}"); do
+    echo "[$(date)] ── cycle ${cycle}/${CYCLES:-1} ──"
+    if [ "${RESEED_BEFORE_RUN:-0}" = "1" ]; then
+        echo "[$(date)] reseeding SuiteCRM demo data"
+        bash scripts/reseed_suitecrm_demo_data.sh > /dev/null
+    fi
+    if python scripts/generate_trajectories.py --config "${CONFIG}" "${OVERRIDE_ARGS[@]}"; then
+        CYCLES_KEPT=$((CYCLES_KEPT + 1))
+    else
+        CYCLES_EMPTY=$((CYCLES_EMPTY + 1))
+        echo "[$(date)] cycle ${cycle} kept nothing — continuing to the next cycle"
+    fi
+done
+echo "[$(date)] done: ${CYCLES_KEPT} cycles kept traces, ${CYCLES_EMPTY} came up empty."
+if [ "${CYCLES_KEPT}" -eq 0 ]; then
+    echo "ERROR: no cycle kept a single trace" >&2
+    exit 1
+fi
