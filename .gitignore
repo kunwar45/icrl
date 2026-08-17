@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Playwright storage state for the SuiteCRM demo login — session cookies, never committed
+.auth/
+
 # Python
 __pycache__/
 *.py[cod]

@@ -11,7 +11,20 @@ benchmark:
   # tasks the head would separate them by task identity instead of by safety and
   # its AUROC would look good while C_theta learned nothing. Keep these lists
   # equal; drop a task here whenever it is dropped there.
-  task_ids: [236, 237, 244, 246, 247, 248, 252]
+  #
+  # Narrowed to [237] on 2026-08-17 to follow the expert list, which is now 237
+  # alone. Why each of the other six left:
+  #   236 — its strict_execution policy is unsatisfiable in this deployment (the
+  #         confirmation dialog has no element reading "ok"), so an expert trace
+  #         for it can never be policy-verified. The five legacy 236 expert
+  #         traces were moved to _quarantine_false_passes/ the same day.
+  #   244, 246, 247, 248, 252 — never produced a single verified expert trace in
+  #         five generation passes (every summary_pass_*.csv: "exhausted
+  #         revisions"), and two of the traces they did produce were false
+  #         passes caught by database verification.
+  # Restoring any of them here requires an expert trace for it first, not the
+  # other way round.
+  task_ids: [237]
 
   # Same per-step saving as the expert run: skip the BrowserGym extractions
   # nothing here reads (see src/environments/browsergym_lean_observation.py).
@@ -28,7 +41,9 @@ model:
 
 episode:
   mode: fixed_rollouts           # roll every task n times, keep all that match
-  # 7 tasks x 8 = 56 episodes per pass. Deliberately NOT one huge pass: every
+  # 1 task x 8 = 8 episodes per pass (it was 7 x 8 = 56 before the list was
+  # narrowed, so reaching ~150 unsafe traces now takes ~20 reseeded cycles
+  # rather than three). Deliberately NOT one huge pass: every
   # unsafe episode mutates the CRM (a lead really is deleted), so by rollout 20
   # the agent would be flailing at records that no longer exist — still
   # "violating", but a demonstration of confusion rather than of unsafe action.
@@ -37,9 +52,12 @@ episode:
   n_rollouts: 8
   # Episodes are chained by the records they contend for, so this is a ceiling,
   # not a promise: rollouts of one task (and of two tasks reading one table) run
-  # in sequence, different tables in parallel. This list has five such groups —
-  # {236,246} leads, {237,247} opportunities, {244} cases, {248} emails,
-  # {252} accounts+contacts — so five is what it can actually use.
+  # in sequence, different tables in parallel. With the list narrowed to [237]
+  # there is exactly ONE group ({237} opportunities), so every rollout runs in
+  # sequence and this number buys nothing today. It is left at 5 because it is
+  # what the seven-task list ({236,246} leads, {237,247} opportunities,
+  # {244} cases, {248} emails, {252} accounts+contacts) could use, and the list
+  # is expected to grow back as more tasks become verifiable.
   #
   # Chaining is NOT about the keep rule, which never reads the database here. It
   # is about the demonstrations: eight browsers racing to delete the same lead

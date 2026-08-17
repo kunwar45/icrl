@@ -51,7 +51,15 @@ def parse_args() -> argparse.Namespace:
                     help="HuggingFace user or org (or set HF_NAMESPACE)")
     ap.add_argument("--date", default=date.today().isoformat(),
                     help="dataset date stamp, YYYY-MM-DD (default: today)")
-    ap.add_argument("--private", action="store_true", default=True)
+    # Private is the default because the data policy's failure mode is
+    # publishing something unverified, and a public dataset cannot be recalled:
+    # it gets mirrored, cached and indexed, and deleting the repo later does not
+    # un-publish what was already fetched. `--public` is therefore explicit.
+    ap.add_argument("--private", dest="private", action="store_true", default=True,
+                    help="publish as a private dataset (default)")
+    ap.add_argument("--public", dest="private", action="store_false",
+                    help="publish as a PUBLIC dataset — anyone can fetch it, "
+                         "and that cannot be undone by deleting the repo later")
     ap.add_argument("--dry-run", action="store_true",
                     help="run the gate and report, publish nothing")
     return ap.parse_args()
@@ -202,8 +210,9 @@ def main() -> int:
     write_dataset_card(args, rows, tasks)
 
     repo_id = f"{args.namespace}/{args.date}-{args.benchmark}-{args.set}"
+    visibility = "private" if args.private else "PUBLIC"
     if args.dry_run:
-        print(f"\nDRY RUN — would publish {len(rows)} traces to {repo_id}")
+        print(f"\nDRY RUN — would publish {len(rows)} traces to {repo_id} ({visibility})")
         return 0
     if not args.namespace:
         print("\n--namespace (or HF_NAMESPACE) is required to publish")
@@ -227,7 +236,7 @@ def main() -> int:
                       repo_type="dataset",
                       allow_patterns=["task_*_trace_*.json", "summary_pass_*.csv",
                                       "README.md"])
-    print(f"\npublished {len(rows)} verified traces to "
+    print(f"\npublished {len(rows)} verified traces ({visibility}) to "
           f"https://huggingface.co/datasets/{repo_id}")
     return 0
 
