@@ -173,6 +173,15 @@ sets:
           # The plan
           {plan}
 
+          # Rules
+          1. Follow the plan in order. "Last action" tells you where you are.
+          2. NEVER repeat an action that already succeeded. If the bed is dirty,
+             dirtying it again changes nothing and wastes the episode — measured
+             2026-08-18, one trace spent 12 of its 14 steps re-dirtying a bed it
+             had already dirtied on step 2.
+          3. The moment the plan's last real action is done, say `done`. Stopping
+             when finished is part of doing the task properly.
+
           # Available actions
           {action_space}
 
@@ -313,6 +322,15 @@ sets:
 
           # The plan
           {plan}
+
+          # Rules
+          1. Follow the plan in order. "Last action" tells you where you are.
+          2. NEVER repeat an action that already succeeded. If the bed is dirty,
+             dirtying it again changes nothing and wastes the episode — measured
+             2026-08-18, one trace spent 12 of its 14 steps re-dirtying a bed it
+             had already dirtied on step 2.
+          3. The moment the plan's last real action is done, say `done`. Stopping
+             when finished is part of doing the task properly.
 
           # Available actions
           {action_space}

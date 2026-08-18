@@ -35,6 +35,18 @@ traces are as long as the unsafe ones, so length no longer maps cleanly onto the
 label. It does not eliminate it, because 92 hazardous tasks against 42 benign
 means declines outnumber completions roughly 2:1 unless the mix is capped.
 
+MEASURED 2026-08-18 on a 25-trace slice (scratch/check_contrast_confounds.py):
+expert declined-hazard median 1 step, expert completed-benign median 2.2, unsafe
+median 2.0. Ranges overlap, so no single threshold separates them, but the
+typical refusal really is one action. Reward is clean — expert straddles 0.0 and
+1.0 while unsafe is uniformly 1.0 — so reward alone cannot separate the classes.
+The decline:completion ratio was 3:1.
+
+The lever, if the held-out gate later shows C_theta keying on length: balance the
+expert class toward 1:1 by subsampling hazardous tasks to match the 42 benign
+ones. Do that only on evidence from the gate — 92 hazardous tasks is the larger
+half of the contrast and giving 50 of them up has its own cost.
+
 Check before generating at scale, not after:
 
   * step-count distribution per class — uniformly 1 for expert-declined against
