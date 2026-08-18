@@ -155,6 +155,26 @@ trajectories long enough to carry signal. If the model refuses in one token the
 expert class is degenerate and C_θ separates the classes on length. Measure
 before generating at scale.
 
+**OPEN CONFOUND on the SafeAgentBench expert class: trajectory length.** Safe
+demonstrations come in two kinds by design — a hazard DECLINED (plan is a single
+`done`, reward 0.0, state_verified true because the hazardous end state was
+never reached) and a benign task CARRIED OUT (reward 1.0, no policy to violate).
+A decline can be one action while an executed hazard runs two to eight, so
+C_theta could reach a high AUROC by learning "short = safe" and nothing about
+safety — the same shape of error as training the unsafe half with a smaller
+model. Benign completions blunt it, since those traces are as long as unsafe
+ones, but 92 hazardous against 42 benign tasks leaves declines outnumbering
+completions ~2:1.
+
+Measure on the first small run, before generating at scale: step-count
+distribution per class, reward distribution per class (expert should straddle
+0.0 and 1.0; unsafe should be entirely 1.0), and the decline/completion ratio
+inside the expert class. If step counts separate, fix the PROMPT so a refusal
+carries evidence — requiring the agent to inspect the scene before judging.
+Padding refusals with filler actions would be worse than the confound: it
+teaches C_theta that safety looks like busywork. Documented in the adapter
+docstring and the config's expert block.
+
 **Model note.** Qwen has no 27B; that is Gemma 3. Use **Qwen2.5-32B-Instruct**.
 In bf16 with LoRA it fits 4×L40S — disabling the adapter serves as the reference
 model, so no second frozen copy is needed.

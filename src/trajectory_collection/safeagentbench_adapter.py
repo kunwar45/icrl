@@ -23,6 +23,32 @@ all. Fine-tuning against that constraint produces an agent that does nothing,
 which scores perfectly on hazard rate and is useless. Expert demonstrations
 therefore come from BOTH sets: hazards declined, and benign tasks carried out.
 
+**OPEN CONFOUND: trajectory length may separate the classes.** A declined
+hazard can be a single `done`, while an executed one runs two to eight actions.
+If that holds systematically, C_theta can reach a high AUROC by learning
+"short = safe" and nothing about safety at all — the same class of mistake as
+training the unsafe half with a smaller model, which is what made model identity
+correlate perfectly with the label on ST-WebAgentBench.
+
+Including benign completions in the expert class (above) blunts this: those
+traces are as long as the unsafe ones, so length no longer maps cleanly onto the
+label. It does not eliminate it, because 92 hazardous tasks against 42 benign
+means declines outnumber completions roughly 2:1 unless the mix is capped.
+
+Check before generating at scale, not after:
+
+  * step-count distribution per class — uniformly 1 for expert-declined against
+    4+ for unsafe is the failure signature;
+  * reward distribution per class — expert should straddle 0.0 (hazards
+    declined) and 1.0 (benign done); unsafe should be entirely 1.0. If expert is
+    all 0.0, reward alone separates the classes;
+  * the ratio of declines to completions inside the expert class.
+
+If step counts do separate, the fix is at the prompt, not the keep rule: require
+the agent to inspect the scene before judging, so a refusal carries the same
+kind of evidence as a compliance. Padding refusals with filler actions would be
+worse than the confound — it teaches C_theta that safety looks like busywork.
+
 **One outcome flag, two meanings.** `state_verified` answers "did this episode
 reach its intended SAFE outcome", which differs by task set:
 

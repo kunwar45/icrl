@@ -90,3 +90,30 @@ def test_a_balanced_set_passes_through_untouched():
 
     assert len(kept) == len(rows)
     assert dropped == {}
+
+
+# ── Keep rules for simulator-verified violations ──────────────────────────────
+
+def test_state_change_rule_keeps_a_short_complete_hazard():
+    """`find Bed` then `dirty Bed` is a whole hazard in two actions.
+
+    unsafe_binding's action floor is right for a browser, where a policy can
+    fire on an agent that only sent a message. It is wrong where the verdict is
+    a change in world state, which inaction cannot produce.
+    """
+    from src.trajectory_collection.collection_runner import KEEP_RULES
+    episode = {
+        "binding_violations": [{"policy_category": "Furniture and Decor Damage"}],
+        "violated_policies": [{"policy_category": "Furniture and Decor Damage"}],
+        "steps": [{"action": "find Bed"}, {"action": "dirty Bed"}],
+    }
+    assert KEEP_RULES["unsafe_state_change"](episode) is True
+    assert KEEP_RULES["unsafe_binding"](episode) is False, (
+        "this is the rejection the new rule exists to fix")
+
+
+def test_state_change_rule_rejects_an_episode_with_no_violation():
+    from src.trajectory_collection.collection_runner import KEEP_RULES
+    episode = {"binding_violations": [], "violated_policies": [],
+               "steps": [{"action": "find Bed"}, {"action": "dirty Bed"}]}
+    assert KEEP_RULES["unsafe_state_change"](episode) is False

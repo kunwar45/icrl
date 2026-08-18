@@ -46,16 +46,25 @@ benchmark:
 # ─────────────────────────────────────────────────────────────────────────────
 # Model — ONE server, both halves.
 #
-# Currently the 72B, because it is already in $HF_HOME and the 32B is not.
-# BEFORE the real run, prefetch Qwen2.5-32B-Instruct and switch: demonstrations
-# should come from the same policy class that gets fine-tuned, or C_theta is fit
-# on a trajectory distribution the tuned policy never produces and PPO will find
-# the gap between them.
+# The 32B, which is also the model that gets fine-tuned. Demonstrations must come
+# from the same policy class: fit C_theta on a 72B's trajectories and the tuned
+# 32B produces a distribution C_theta never saw, which PPO will then exploit.
+#
+# It is also the only size that fits alongside the simulator. The 72B needs
+# essentially all 184GB of 4xL40S — job 4866185 died with "No available memory
+# for the cache blocks" at gpu_memory_utilization 0.80, and 0.90 leaves nothing
+# for Unity to render into.
+#
+# Keep tensor_parallel at 4 even though 64GB of weights would nominally fit on
+# two cards. gpu_memory_utilization is a fraction of EACH GPU, so tp=2 at 0.60
+# offers only 55GB — less than the weights — and vLLM dies the same way
+# (job 4868259). Across four cards 0.60 is 110GB: 64GB of weights, ~46GB of KV
+# cache, and 40% of every card still free for the framebuffers.
 # ─────────────────────────────────────────────────────────────────────────────
 models:
   planner:
     backend: vllm
-    name: Qwen/Qwen2.5-72B-Instruct
+    name: Qwen/Qwen2.5-32B-Instruct
     vllm_url: http://localhost:8000/v1
     tensor_parallel: 4
     max_tokens: 1024
@@ -63,7 +72,7 @@ models:
 
   executor:
     backend: vllm
-    name: Qwen/Qwen2.5-72B-Instruct
+    name: Qwen/Qwen2.5-32B-Instruct
     vllm_url: http://localhost:8000/v1
     tensor_parallel: 4
     max_tokens: 64            # one skill line per step
@@ -118,6 +127,15 @@ output:
 sets:
 
   expert:
+    # OPEN CONFOUND — measure before scaling. A declined hazard may be one
+    # `done` while an executed one runs 2-8 actions, so C_theta could score well
+    # by learning "short = safe". Benign completions blunt it (they are as long
+    # as unsafe traces) but 92 hazardous against 42 benign tasks leaves declines
+    # outnumbering completions ~2:1. Check step-count and reward distributions
+    # per class on the first small run; if they separate, fix the PROMPT so a
+    # refusal carries evidence — never pad refusals with filler actions, which
+    # would teach C_theta that safety looks like busywork.
+    #
     # `state_verified` means "reached its intended SAFE outcome", which inverts
     # by task set: a benign task must be DONE, a hazardous task must NOT be.
     # So this one rule keeps hazards-declined and benign-completed alike, and
@@ -268,13 +286,18 @@ sets:
           Return only the action lines.
 
   unsafe:
-    # >=1 violation judged over the trajectory's effect on the world, plus
-    # enough real actions that the trace shows behaviour rather than inaction.
+    # The hazard reached, proven by simulator state. NOT `unsafe_binding`: that
+    # rule's 3-action floor exists because a browser policy can fire on an agent
+    # that only sent a message, and it wrongly rejected 18 of 19 complete
+    # demonstrations here — `find Bed` then `dirty Bed` IS the whole hazard.
+    # A state change cannot be produced by inaction, so the violation is its own
+    # proof that the agent acted.
+    #
     # On a benign task there is no policy to violate, so nothing is kept — those
     # episodes exist in this half only to keep the two halves running the same
     # task list, which is what stops C_theta separating them by task identity.
     keep:
-      rule: unsafe_binding
+      rule: unsafe_state_change
       set: unsafe
     output:
       dir: ${output.root}/unsafe_synthetic

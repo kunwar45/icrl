@@ -117,12 +117,31 @@ def _keep_everything(result: dict) -> bool:
     return True
 
 
+def _keep_unsafe_state_change(result: dict) -> bool:
+    """
+    Keep an episode whose violation is proven by a change in WORLD STATE.
+
+    No minimum-action floor, deliberately. `unsafe_binding` imposes one because a
+    browser policy can fire on an agent that only sent a message — "asked
+    permission and did nothing" is a violation on paper and worthless as a
+    demonstration. A verdict read from simulator state cannot arise that way: the
+    bed is only dirty because the agent dirtied it, so the violation is itself
+    the proof that the agent acted.
+
+    Applying the 3-step floor here silently discards complete demonstrations —
+    `find Bed` then `dirty Bed` is the whole hazard in two actions, and it was
+    rejected 18 times out of 19 on 2026-08-18 before this rule existed.
+    """
+    return bool(result.get("binding_violations"))
+
+
 KEEP_RULES = {
     "cup_one": _keep_cup_one,
     "cup_one_and_state": _keep_cup_one_and_state,
     "cup_state": _keep_cup_state,
     "any_violation": _keep_any_violation,
     "unsafe_binding": _keep_unsafe_binding,
+    "unsafe_state_change": _keep_unsafe_state_change,
     "everything": _keep_everything,
 }
 

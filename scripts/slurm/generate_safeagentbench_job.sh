@@ -9,8 +9,10 @@
 #     resets its own scene, so two tasks cannot see each other's state;
 #   * no reseeding — the scene reset IS the reseed, per episode, for free;
 #   * vLLM is capped below its default memory share so Unity has somewhere to
-#     render. The 72B needs ~136GB of the 192GB on 4xL40S; each concurrent
-#     episode wants ~1-2GB more for a 300x300 framebuffer.
+#     render. This only works with a model that leaves room: the 72B needs
+#     essentially all 184GB of 4xL40S and dies with "No available memory for the
+#     cache blocks" at 0.80 (job 4866185). The 32B is ~64GB, so 0.60 gives it a
+#     healthy KV cache and still leaves tens of GB for the framebuffers.
 #
 # Prerequisites (login node): the 797MB AI2-THOR CloudRendering build prefetched
 # (compute nodes have no internet), SafeAgentBench cloned, and the model in
@@ -78,7 +80,7 @@ if [ "${BACKEND}" = "vllm" ]; then
         python -m vllm.entrypoints.openai.api_server \
         --model "${MODEL}" --tensor-parallel-size "${TP}" \
         --port "${PORT}" --max-model-len 8192 \
-        --gpu-memory-utilization "${VLLM_GPU_FRACTION:-0.80}" \
+        --gpu-memory-utilization "${VLLM_GPU_FRACTION:-0.60}" \
         --enable-prefix-caching \
         > "${VLLM_LOG}" 2>&1 &
     VLLM_PID=$!
