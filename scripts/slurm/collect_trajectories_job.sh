@@ -11,7 +11,7 @@
 #     sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 scripts/slurm/collect_trajectories_job.sh
 #
 #   # Unsafe (Qwen-7B, tensor_parallel: 1):
-#   CONFIG=configs/trajectory_collection/stwebagentbench_unsafe.yaml \
+#   CONFIG=configs/trajectory_generation/stwebagentbench_contrast.yaml \
 #     sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:1 scripts/slurm/collect_trajectories_job.sh
 #
 #   # Config overrides pass through:
@@ -19,7 +19,7 @@
 #
 #   # Several reseed-and-collect cycles in one allocation (150 unsafe demos):
 #   CYCLES=4 RESEED_BEFORE_RUN=1 \
-#     CONFIG=configs/trajectory_collection/stwebagentbench_unsafe.yaml \
+#     CONFIG=configs/trajectory_generation/stwebagentbench_contrast.yaml \
 #     sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:1 scripts/slurm/collect_trajectories_job.sh
 #
 #   # Against SuiteCRM shard 2 instead of the single shared instance:
@@ -147,7 +147,7 @@ fi
 # behaviour this set is supposed to demonstrate. Reseeding between cycles keeps
 # every rollout starting from the same reachable world.
 # A barren cycle must not kill the chain — see the same guard in
-# generate_trajectories_job.sh. The collector exits non-zero when a pass keeps
+# generate_contrast_dataset_job.sh. The collector exits non-zero when a pass keeps
 # nothing, and under `set -e` that ends the whole run on the first empty cycle
 # instead of trying again over a freshly reseeded database.
 CYCLES_KEPT=0

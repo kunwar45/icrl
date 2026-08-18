@@ -13,9 +13,16 @@ given task_instance_id land on the same side of the split. Two trajectories of
 the same task share almost identical observations, so a per-trajectory split
 leaks the eval set into training.
 
+Task balance is enforced at the same time. Sets are generated to a per-task
+target (see src/trajectory_data/dataset_shape.py); any task that still arrives
+above the ceiling is downsampled here, and any task below the floor is reported.
+An unbalanced set trains C_theta to recognise its dominant task rather than the
+safety boundary.
+
 Usage:
     python scripts/make_demo_splits.py                      # defaults below
     python scripts/make_demo_splits.py --held-out-frac 0.3 --seed 7
+    python scripts/make_demo_splits.py --max-traces-per-task 8
 
 Inputs — either format, per side:
     a .jsonl of Trajectory dicts        (data/demos/safe.jsonl)
@@ -40,6 +47,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.trajectory_data.dataset_shape import (MAX_TRACES_PER_TASK,  # noqa: E402
+                                               MIN_TRACES_PER_TASK)
 from src.trajectory_data.demo_loader import load_demos  # noqa: E402
 
 
@@ -53,6 +62,37 @@ def write_jsonl(rows: list[dict], path: Path) -> None:
     with open(path, "w") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
+
+
+def cap_per_task(rows: list[dict], max_per_task: int, rng: random.Random):
+    """
+    Downsample any task above the per-task ceiling.
+
+    Generation targets 5-10 traces per task (see
+    src/trajectory_generation/generation_runner.py), but a legacy or hand-merged
+    set can still arrive lopsided — the 2026-08-17 expert set was 110 traces of
+    task 237. Left uncapped, that one task supplies most of the training signal
+    and C_theta learns to recognise it instead of the safety boundary, which
+    shows up downstream only as an AUROC nobody can explain.
+
+    Returns (kept_rows, dropped_by_task).
+    """
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        groups[str(r.get("task_instance_id", "?"))].append(r)
+
+    kept, dropped = [], {}
+    for task_id in sorted(groups):
+        group = groups[task_id]
+        if len(group) <= max_per_task:
+            kept.extend(group)
+            continue
+        # Sample rather than truncate: traces are written in generation order, so
+        # the first N share a pass, a seed and often a plan.
+        keep_these = rng.sample(group, max_per_task)
+        kept.extend(keep_these)
+        dropped[task_id] = len(group) - max_per_task
+    return kept, dropped
 
 
 def split_by_task(rows: list[dict], held_out_frac: float, rng: random.Random):
@@ -86,6 +126,10 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--limit", type=int, default=None,
                     help="Keep only the first N trajectories of each label (smoke runs)")
+    ap.add_argument("--max-traces-per-task", type=int, default=MAX_TRACES_PER_TASK,
+                    help=f"Ceiling per task id, matching the generation band "
+                         f"(default {MAX_TRACES_PER_TASK}). Tasks above it are "
+                         f"downsampled so no single task dominates C_theta.")
     args = ap.parse_args()
 
     for p in (args.safe, args.unsafe):
@@ -105,7 +149,26 @@ def main() -> int:
         rows = load_rows(src)
         if args.limit:
             rows = rows[: args.limit]
+
+        n_loaded = len(rows)
+        rows, dropped = cap_per_task(rows, args.max_traces_per_task, rng)
+        if dropped:
+            print(f"{label:6s}  capped at {args.max_traces_per_task}/task: dropped "
+                  f"{sum(dropped.values())} trace(s) from "
+                  f"{len(dropped)} over-represented task(s) "
+                  f"{sorted(dropped)}")
+
         train, held, train_ids, held_ids = split_by_task(rows, args.held_out_frac, rng)
+
+        # A task under the floor is not fatal, but it is the thing that quietly
+        # makes a held-out AUROC meaningless, so it is never left unsaid.
+        counts: dict[str, int] = defaultdict(int)
+        for r in rows:
+            counts[str(r.get("task_instance_id", "?"))] += 1
+        thin = sorted(t for t, n in counts.items() if n < MIN_TRACES_PER_TASK)
+        if thin:
+            print(f"{label:6s}  WARNING: {len(thin)} task(s) below the "
+                  f"{MIN_TRACES_PER_TASK}-trace floor: {thin}")
 
         write_jsonl(train, train_out)
         write_jsonl(held, eval_out)
@@ -113,7 +176,12 @@ def main() -> int:
         n_terminated = sum(1 for r in rows if r.get("terminated"))
         manifest["labels"][label] = {
             "source": str(src),
+            "n_loaded": n_loaded,
             "n_total": len(rows),
+            "max_traces_per_task": args.max_traces_per_task,
+            "dropped_over_cap": dropped,
+            "tasks_below_floor": thin,
+            "traces_per_task": dict(sorted(counts.items())),
             "n_terminated": n_terminated,
             "n_train": len(train),
             "n_held_out": len(held),

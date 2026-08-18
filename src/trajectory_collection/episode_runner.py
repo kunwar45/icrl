@@ -327,6 +327,11 @@ def run_episode(adapter, client, cfg: dict, task_id: int | str,
                 logger.info("task %s: reward %.1f but state NOT verified:\n%s",
                             task_id, best_reward, detail)
 
+        # Adapters over a simulator report world state on every step, so they
+        # fill in the ground-truth fields here rather than through a separate
+        # persistence query. No-op for everyone else.
+        adapter.finalize_result(result, info)
+
     except Exception as e:
         result["error"] = str(e)
         logger.warning("task %s: episode error: %s", task_id, e)

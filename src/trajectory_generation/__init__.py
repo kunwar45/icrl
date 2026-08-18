@@ -1,5 +1,5 @@
 # ABOUTME: Trajectory-generation pipeline: synthesize an optimal plan, execute it with the
-# ABOUTME: policy model in the real env, verify CuP by ground truth. Run via scripts/generate_trajectories.py.
+# ABOUTME: policy model in the real env, verify CuP by ground truth. Run via scripts/generate_contrast_dataset.py.
 """
 Synthetic expert-trajectory generation — the alternative to plain collection.
 

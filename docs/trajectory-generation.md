@@ -1,10 +1,27 @@
-# Trajectory generation — synthetic expert trajectories
+# Trajectory generation — the contrast dataset
 
 The parallel alternative to [data collection](trajectory-collection.md): instead of
 hoping a strong model stumbles into CuP=1 rollouts, **synthesize what an
 optimal trajectory should be, execute it, and let the benchmark's ground-truth
 evaluators verify it**. This is synthetic data generation for SFT: a staged
 draft → refine → generate → verify pipeline, adapted to embodied browser tasks.
+
+**Both halves come out of one config and one job.** C_theta is learned by
+contrast, so the expert and unsafe sets are two halves of one dataset, not two
+runs that happen to be related. Anything that differs systematically between
+them is a feature the constraint head can learn *instead* of safety, so
+`configs/trajectory_generation/stwebagentbench_contrast.yaml` declares the task
+list, the model, the episode limits and the per-task target once, and lets the
+two sets override only three things:
+
+| Shared by construction | May differ per set |
+|---|---|
+| task ids, planner + executor model, temperature schedule, step budget, traces per task | whether the agent is told the policies (`prompts`), what counts as a keeper (`keep.rule`), where traces land (`output.dir`) |
+
+The unsafe half runs the **same 72B** as the expert half, not a weaker model:
+model identity that correlates perfectly with the label is the confound this
+config exists to remove. A policy-blind 72B does the literal thing the policies
+forbid, which is a cleaner violation than a small model flailing.
 
 ## The stages
 
@@ -31,12 +48,13 @@ Two deliberate differences from pure text pipelines:
 ## Architecture
 
 ```
-scripts/generate_trajectories.py                      THE entrypoint (thin CLI)
-configs/trajectory_generation/<run>.yaml              fully defines a run, prompts included
+scripts/generate_contrast_dataset.py                  THE entrypoint — resolves both sets, runs them
+configs/trajectory_generation/<run>.yaml              fully defines the run, both sets, prompts included
 src/trajectory_generation/
   plan_generator.py                                   propose / refine / revise + failure report
   generation_runner.py                                per-task loop: plan → execute → verify → revise
-scripts/slurm/generate_trajectories_job.sh                    starts 1–2 vLLM servers, then generates
+src/trajectory_data/dataset_shape.py                  the per-task trace band, enforced at both ends
+scripts/slurm/generate_contrast_dataset_job.sh        one vLLM server, expert then unsafe, reseeded cycles
 ```
 
 Generality comes from reusing the **same `BenchmarkAdapter` seam** as
@@ -57,7 +75,7 @@ server; the wrapper splits `CUDA_VISIBLE_DEVICES` and starts both.
 
 ```bash
 # Default (one shared 72B server, 4 GPUs):
-CONFIG=configs/trajectory_generation/stwebagentbench_expert.yaml \
+CONFIG=configs/trajectory_generation/stwebagentbench_contrast.yaml \
   sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 scripts/slurm/generate_trajectories_job.sh
 
 # In-distribution 7B executor instead (5 GPUs, two servers):
@@ -66,7 +84,7 @@ OVERRIDES="models.executor.name=Qwen/Qwen2.5-7B-Instruct models.executor.vllm_ur
 
 # Laptop smoke (OpenRouter backends, 1 task, output under data/smoke/):
 python scripts/generate_trajectories.py \
-  --config configs/trajectory_generation/stwebagentbench_expert.yaml --smoke
+  --config configs/trajectory_generation/stwebagentbench_contrast.yaml --smoke
 ```
 
 ## Plan diversity
@@ -85,9 +103,26 @@ mechanisms, both config-driven (`diversity:` block):
    The per-task max similarity lands in `summary.csv`, so homogeneity is
    visible even when the gate never fires.
 
-Each task gets at most `1 + generation_loop.max_plan_revisions` real-env
-executions (default 4). The job exits non-zero if nothing survived
-verification.
+Each plan cycle gets at most `1 + generation_loop.max_plan_revisions` real-env
+executions, and a cycle that fails every revision ends the task for this pass
+rather than starting a fresh plan against the same state. The job exits non-zero
+if a half survived verification with nothing.
+
+## Dataset shape
+
+`src/trajectory_data/dataset_shape.py` holds one policy both ends of the
+pipeline read: **5–10 verified traces per task, per set**. Below the floor a
+task contributes too little for the held-out split to say anything about it;
+above the ceiling near-duplicates of one task dominate the loss and C_theta
+learns to recognise that task rather than the safety boundary — which is what
+the 2026-08-17 expert set (110 traces of task 237) would have done.
+
+* generation rejects an out-of-band `traces_per_task` and stops a task at target;
+* `scripts/make_demo_splits.py` downsamples anything that still arrives over the
+  ceiling (sampling, not truncating — the first N traces share a pass and a
+  plan) and warns about tasks under the floor.
+
+Widen the dataset by adding task ids. Never by raising the ceiling.
 
 ## Throughput
 
@@ -97,13 +132,17 @@ episode's writes land inside the other's before/after comparison and both
 verdicts are fiction. The chains are derived from the checks' own SQL, so they
 cannot drift from what the checks query.
 
-A cycle yields **at most one trace per task**, because the keep rule is
-differential: once a task's goal state is reached, no later episode in that
-cycle can be credited with reaching it. So traces per cycle is bounded by the
-number of tasks that keep, and widening `TASK_STATE_CHECKS` is worth more than
-any speed lever. `CYCLES` + `RESEED_BEFORE_RUN=1` runs several reseed-and-
-generate rounds per allocation; `scripts/start_suitecrm_shards.sh` lets several
-allocations run at once.
+Each task is generated to `generation_loop.traces_per_task`, and each trace
+gets its **own** plan cycle — several traces of one task are only worth having
+if they differ, so the diversity gate is measured within a task as well as
+across tasks.
+
+For a destructive or one-shot task the keep rule is differential: once the goal
+state is reached, no later episode in that cycle can be credited with reaching
+it, so such a task yields at most one trace per reseed. That is why the target
+counts traces **already on disk** — `CYCLES` + `RESEED_BEFORE_RUN=1` converge on
+it across rounds, and a task already at target is skipped without booting a
+browser. `scripts/start_suitecrm_shards.sh` lets several allocations run at once.
 
 See [throughput](trajectory-throughput.md) for the full picture — lean
 observation extraction, prefix-cache-aware prompt ordering, connection pooling,
@@ -111,8 +150,8 @@ and what was tried and rejected.
 
 ## Output
 
-`$SCRATCH/trajectories/<benchmark>/expert_synthetic/` — the **collection trace
-schema plus provenance**, so `trace_loader.py` and every downstream stage
+`$SCRATCH/trajectories/<benchmark>/{expert_synthetic,unsafe_synthetic}/` — the
+**collection trace schema plus provenance**, so `trace_loader.py` and every downstream stage
 consume it unchanged, while the source stays distinguishable (never silently
 mixed with collected expert traces):
 

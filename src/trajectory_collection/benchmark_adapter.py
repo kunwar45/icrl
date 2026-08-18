@@ -129,6 +129,22 @@ class BenchmarkAdapter(ABC):
             "implement verify_persisted_state or turn off "
             "verification.require_persisted_state for this run")
 
+    def finalize_result(self, result: dict, info: dict) -> None:
+        """
+        Last chance to set benchmark-specific ground-truth fields on a finished
+        episode. Default does nothing.
+
+        `state_verified` normally comes from `verify_persisted_state`, which
+        assumes the backing store must be queried separately from the episode —
+        true for a web app, false for a simulator that reports full world state
+        on every step. An adapter of the second kind sets the field here instead,
+        and keeps the same meaning: True iff this episode reached its intended
+        SAFE outcome, so the existing keep rules apply unchanged.
+
+        Mutate `result` in place; `info` is the final step's info dict.
+        """
+        return None
+
     def task_metadata(self, task_id: int | str) -> dict[str, str]:
         """
         Goal + policy text for a task WITHOUT running an episode — what the

@@ -8,8 +8,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from src.trajectory_collection.benchmark_adapter import BenchmarkAdapter
-from src.trajectory_generation.generation_runner import run_generation
+from src.trajectory_data.dataset_shape import (MAX_TRACES_PER_TASK,
+                                               MIN_TRACES_PER_TASK)
+from src.trajectory_generation.generation_runner import (existing_trace_count,
+                                                         resolve_traces_per_task,
+                                                         run_generation)
 from src.trajectory_generation.plan_generator import build_failure_report
 
 
@@ -63,13 +69,22 @@ class FakeAdapter(BenchmarkAdapter):
 
 
 class ScriptedPlanner:
-    """Returns queued responses in order: propose, refine, revise, revise, ..."""
+    """Returns queued responses in order: propose, refine, revise, revise, ...
+
+    Once the queue runs out it repeats the last response. Generation produces
+    several traces per task, each from a fresh plan cycle, so a queue sized for
+    one cycle would otherwise raise StopIteration in the middle of the second —
+    a test failure about the fixture rather than about the code.
+    """
     def __init__(self, responses):
         it = iter(responses)
+        last = {"text": responses[-1]}
+
         class _Completions:
             @staticmethod
             def create(**kwargs):
-                text = next(it)
+                text = next(it, last["text"])
+                last["text"] = text
                 class _Msg: content = text
                 class _Choice: message = _Msg()
                 class _Resp: choices = [_Choice()]
@@ -96,7 +111,8 @@ class PlanEchoExecutor:
         self.chat = _Chat()
 
 
-def _cfg(tmp_path: Path, script, max_revisions=2, task_ids=(1,), diversity=None):
+def _cfg(tmp_path: Path, script, max_revisions=2, task_ids=(1,), diversity=None,
+         traces_per_task=MIN_TRACES_PER_TASK):
     return {
         "generation": "fake_generation_test",
         "benchmark": {"name": "fake", "task_ids": list(task_ids), "script": script},
@@ -108,7 +124,8 @@ def _cfg(tmp_path: Path, script, max_revisions=2, task_ids=(1,), diversity=None)
                          "temperature": 0.0},
         },
         "episode": {"max_steps": 4},
-        "generation_loop": {"max_plan_revisions": max_revisions},
+        "generation_loop": {"max_plan_revisions": max_revisions,
+                            "traces_per_task": traces_per_task},
         "keep": {"rule": "cup_one", "set": "expert_synthetic"},
         "output": {"dir": str(tmp_path / "out")},
         "prompts": {
@@ -153,7 +170,9 @@ def test_verified_plan_saved_with_provenance(tmp_path, monkeypatch):
     planner = ScriptedPlanner(["draft_plan", "good_plan"])
     outcome = _run(_cfg(tmp_path, script), planner, monkeypatch)
 
-    assert outcome["kept"] == 1 and outcome["episodes"] == 1
+    # One task, generated to the per-task target — not to a single trace.
+    assert outcome["kept"] == MIN_TRACES_PER_TASK
+    assert outcome["episodes"] == MIN_TRACES_PER_TASK
     trace = json.loads((tmp_path / "out" / "task_1_trace_0.json").read_text())
     assert trace["set"] == "expert_synthetic"
     assert trace["pipeline"] == "trajectory_generation"
@@ -173,15 +192,22 @@ def test_failed_plan_gets_revised_then_passes(tmp_path, monkeypatch):
     planner = ScriptedPlanner(["draft", "bad_plan", "fixed_plan"])
     outcome = _run(_cfg(tmp_path, script), planner, monkeypatch)
 
-    assert outcome["kept"] == 1 and outcome["episodes"] == 2
+    # The first trace costs two episodes (the failure plus the revision); the
+    # remaining traces reuse the now-working plan text at one episode each.
+    assert outcome["kept"] == MIN_TRACES_PER_TASK
+    assert outcome["episodes"] == MIN_TRACES_PER_TASK + 1
     trace = json.loads((tmp_path / "out" / "task_1_trace_0.json").read_text())
     assert trace["plan"] == "fixed_plan"
     assert trace["plan_revisions"] == 1
 
 
 def test_similar_plan_triggers_diversify_pass(tmp_path, monkeypatch):
-    # Task 1 succeeds with "plan_alpha_for_task"; task 2's refined plan is
-    # near-identical, so the diversity gate must fire and use the diversified one.
+    """The diversity gate has to fire WITHIN a task, not just across tasks.
+
+    Several traces of one task are only worth having if they differ, so the
+    second plan cycle must be measured against the first cycle's verified plan
+    and diversified when it echoes it.
+    """
     good_a = "plan_alpha_for_task steps one two three four five"
     near_dup = "plan_alpha_for_task steps one two three four SIX"
     distinct = "totally_different_route_via_search"
@@ -189,16 +215,18 @@ def test_similar_plan_triggers_diversify_pass(tmp_path, monkeypatch):
         good_a: {"reward": 1.0, "terminated": True, "violations": []},
         distinct: {"reward": 1.0, "terminated": True, "violations": []},
     }
-    # task1: propose, refine → good_a (kept, enters history)
-    # task2: propose, refine → near_dup (similarity fires) → diversify → distinct
+    # cycle 1: propose, refine → good_a (kept, enters history)
+    # cycle 2: propose, refine → near_dup (similarity fires) → diversify → distinct
     planner = ScriptedPlanner(["draft1", good_a, "draft2", near_dup, distinct])
-    cfg = _cfg(tmp_path, script, task_ids=[1, 2],
+    cfg = _cfg(tmp_path, script, task_ids=[1],
                diversity={"enabled": True, "max_similarity": 0.85, "history": 8})
     outcome = _run(cfg, planner, monkeypatch)
 
-    assert outcome["kept"] == 2
-    trace2 = json.loads((tmp_path / "out" / "task_2_trace_0.json").read_text())
-    assert trace2["plan"] == distinct
+    assert outcome["kept"] == MIN_TRACES_PER_TASK
+    first = json.loads((tmp_path / "out" / "task_1_trace_0.json").read_text())
+    second = json.loads((tmp_path / "out" / "task_1_trace_1.json").read_text())
+    assert first["plan"] == good_a
+    assert second["plan"] == distinct, "second trace must not echo the first"
 
     summary = (tmp_path / "out" / "summary.csv").read_text()
     assert "plan_similarity" in summary.splitlines()[0]
@@ -218,7 +246,8 @@ def test_only_successful_plans_enter_history(tmp_path, monkeypatch):
                diversity={"enabled": True, "max_similarity": 0.85, "history": 8})
     outcome = _run(cfg, planner, monkeypatch)
 
-    assert outcome["kept"] == 1  # only task 2
+    assert outcome["kept"] == MIN_TRACES_PER_TASK  # only task 2 ever keeps
+    assert not list((tmp_path / "out").glob("task_1_trace_*.json"))
     trace2 = json.loads((tmp_path / "out" / "task_2_trace_0.json").read_text())
     assert trace2["plan"] == near_dup  # used as-is, no diversification
 
@@ -233,6 +262,80 @@ def test_exhausted_revisions_saves_nothing(tmp_path, monkeypatch):
     assert not list((tmp_path / "out").glob("task_*_trace_*.json"))
     summary = (tmp_path / "out" / "summary.csv").read_text()
     assert "exhausted revisions" in summary
+
+
+# ── The per-task trace target ─────────────────────────────────────────────────
+# C_theta is split by task id and trained by contrast, so a set of 110 traces of
+# one task teaches it to recognise that task rather than the safety boundary.
+# The target is enforced here, at the only place that can still fix it cheaply.
+
+def test_target_outside_the_band_is_rejected():
+    for bad in (1, MIN_TRACES_PER_TASK - 1, MAX_TRACES_PER_TASK + 1, 110):
+        with pytest.raises(ValueError, match="outside the band"):
+            resolve_traces_per_task({"generation_loop": {"traces_per_task": bad}})
+
+
+def test_missing_target_is_rejected():
+    with pytest.raises(KeyError, match="traces_per_task is required"):
+        resolve_traces_per_task({"generation_loop": {"max_plan_revisions": 2}})
+
+
+def test_generation_stops_at_the_target(tmp_path, monkeypatch):
+    """A task that keeps every episode must still stop at the target, or one easy
+    task runs away with the dataset."""
+    script = {"good_plan": {"reward": 1.0, "terminated": True, "violations": []}}
+    planner = ScriptedPlanner(["draft_plan", "good_plan"])
+    cfg = _cfg(tmp_path, script, traces_per_task=MAX_TRACES_PER_TASK)
+    outcome = _run(cfg, planner, monkeypatch)
+
+    assert outcome["kept"] == MAX_TRACES_PER_TASK
+    assert len(list((tmp_path / "out").glob("task_1_trace_*.json"))) == MAX_TRACES_PER_TASK
+    assert outcome["tasks_at_target"] == 1
+    assert outcome["tasks_short_of_target"] == []
+
+
+def test_traces_already_on_disk_count_towards_the_target(tmp_path, monkeypatch):
+    """Passes must converge on the target rather than stack on top of it — this is
+    what turns repeated cycles into a balanced set instead of a pile."""
+    out = tmp_path / "out"
+    out.mkdir()
+    for n in range(3):
+        (out / f"task_1_trace_{n}.json").write_text("{}")
+
+    script = {"good_plan": {"reward": 1.0, "terminated": True, "violations": []}}
+    planner = ScriptedPlanner(["draft_plan", "good_plan"])
+    outcome = _run(_cfg(tmp_path, script, traces_per_task=5), planner, monkeypatch)
+
+    assert outcome["kept"] == 2, "only the shortfall is generated"
+    assert len(list(out.glob("task_1_trace_*.json"))) == 5
+
+
+def test_task_already_at_target_is_skipped_without_an_episode(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    out.mkdir()
+    for n in range(MIN_TRACES_PER_TASK):
+        (out / f"task_1_trace_{n}.json").write_text("{}")
+
+    script = {"good_plan": {"reward": 1.0, "terminated": True, "violations": []}}
+    planner = ScriptedPlanner(["draft_plan", "good_plan"])
+    outcome = _run(_cfg(tmp_path, script, traces_per_task=MIN_TRACES_PER_TASK),
+                   planner, monkeypatch)
+
+    assert outcome["kept"] == 0 and outcome["episodes"] == 0
+    assert "at target" in (out / "summary.csv").read_text()
+
+
+def test_existing_trace_count_ignores_other_tasks(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "task_1_trace_0.json").write_text("{}")
+    (out / "task_1_trace_1.json").write_text("{}")
+    (out / "task_2_trace_0.json").write_text("{}")
+    (out / "manifest.json").write_text("{}")
+
+    assert existing_trace_count(out, 1) == 2
+    assert existing_trace_count(out, 2) == 1
+    assert existing_trace_count(out, 3) == 0
 
 
 def test_executor_temperature_ramps_across_revisions(tmp_path, monkeypatch):
@@ -337,7 +440,7 @@ def test_colliding_tasks_are_serialised_while_others_overlap(tmp_path, monkeypat
 
     adapter, outcome = _run_concurrent(cfg, monkeypatch)
 
-    assert outcome["kept"] == 5
+    assert outcome["kept"] == 5 * MIN_TRACES_PER_TASK
     # Never two episodes of one group at once...
     assert max(adapter.max_in_flight_per_group.values()) == 1
     # ...but the three independent groups really did overlap, or concurrency
@@ -358,8 +461,9 @@ def test_concurrent_traces_do_not_overwrite_each_other(tmp_path, monkeypatch):
 
     _adapter, outcome = _run_concurrent(cfg, monkeypatch)
 
-    assert outcome["kept"] == 6
-    assert len(list((tmp_path / "out").glob("task_*_trace_*.json"))) == 6
+    expected = 6 * MIN_TRACES_PER_TASK
+    assert outcome["kept"] == expected
+    assert len(list((tmp_path / "out").glob("task_*_trace_*.json"))) == expected
 
 
 def test_summary_rows_stay_in_task_order_under_concurrency(tmp_path, monkeypatch):

@@ -4,11 +4,19 @@
 The loop per task:
 
     metadata = adapter.task_metadata(task)          # goal + policies, no episode
-    plan     = refine(propose(metadata))            # planner model, 2 calls
-    for revision in 0..max_plan_revisions:
-        result = run_episode(..., extra_fields={plan})   # executor model, REAL env
-        if keep(result): save(result + plan); break      # ground-truth verified
-        plan = revise(plan, failure_report(result))      # planner sees what broke
+    while traces_on_disk < generation_loop.traces_per_task:
+        plan = refine(propose(metadata))            # a FRESH plan per trace
+        for revision in 0..max_plan_revisions:
+            result = run_episode(..., extra_fields={plan})  # executor, REAL env
+            if keep(result): save(result + plan); break     # ground-truth verified
+            plan = revise(plan, failure_report(result))     # planner sees what broke
+        if nothing was kept this plan cycle: stop, let the next pass retry
+
+Every task is generated to the same per-task target so no single task can
+dominate the dataset (see `traces_per_task` in the config). The target counts
+traces already on disk, so repeated passes converge on it instead of piling
+more traces onto the tasks that happen to keep most easily; a task already at
+target is skipped without booting a browser.
 
 Saved traces use the collection trace schema plus provenance fields
 (pipeline, plan, plan_revisions), so trace_loader and every downstream stage
@@ -21,6 +29,7 @@ import json
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,6 +39,7 @@ from src.trajectory_collection.collection_runner import (KEEP_RULES, _next_trace
 from src.trajectory_collection.episode_concurrency import (group_into_chains,
                                                            run_chains)
 from src.trajectory_collection.episode_runner import run_episode
+from src.trajectory_data.dataset_shape import check_target, describe_band
 from src.trajectory_generation.plan_generator import (build_failure_report,
                                                       diversify_plan,
                                                       plan_similarity,
@@ -41,8 +51,15 @@ logger = logging.getLogger(__name__)
 #: Attempts at reading a task's goal + policies before giving up on it for this
 #: cycle. Reading metadata boots a browser and logs in, and concurrent logins to
 #: one SuiteCRM time out intermittently — a transport failure, not a task
-#: failure, so it is worth one more try before losing the task's whole cycle.
-_METADATA_ATTEMPTS = 2
+#: failure, and losing it costs the task its entire run. The cache is warmed
+#: serially in run_generation, so these retries are the second line of defence.
+_METADATA_ATTEMPTS = 3
+
+#: Base backoff between metadata attempts, multiplied by the attempt number. A
+#: login timeout lasts 30s, so retries spaced tighter than that just re-enter
+#: the same failure window — which is exactly how tasks 244 and 247 lost both
+#: their attempts on 2026-08-17.
+_METADATA_RETRY_SECONDS = 20
 
 
 def _build_client(model_cfg: dict):
@@ -56,6 +73,28 @@ def _build_client(model_cfg: dict):
     if backend == "hf-local":
         return make_hf_client(model_name=model_cfg["name"])
     raise ValueError(f"unknown model backend {backend!r}")
+
+
+def resolve_traces_per_task(cfg: dict) -> int:
+    """
+    The per-task trace target, validated against the design band.
+
+    A config that asks for 1 or for 110 is a dataset-design error, not a knob
+    setting, so it fails here rather than three stages downstream where it
+    surfaces as an unexplained AUROC.
+    """
+    loop_cfg = cfg.get("generation_loop") or {}
+    if "traces_per_task" not in loop_cfg:
+        raise KeyError(
+            "generation_loop.traces_per_task is required — every set is generated "
+            f"to the same per-task target ({describe_band()})")
+    return check_target(int(loop_cfg["traces_per_task"]),
+                        "generation_loop.traces_per_task")
+
+
+def existing_trace_count(output_dir: Path, task_id) -> int:
+    """Verified traces already on disk for a task, across every earlier pass."""
+    return len(list(output_dir.glob(f"task_{task_id}_trace_*.json")))
 
 
 def _save_trace(result: dict, cfg: dict, plan: str, revisions: int,
@@ -111,6 +150,7 @@ def run_generation(cfg: dict) -> dict:
     keep = KEEP_RULES[cfg["keep"]["rule"]]
     prompts = cfg["prompts"]
     max_revisions = int(cfg["generation_loop"]["max_plan_revisions"])
+    traces_per_task = resolve_traces_per_task(cfg)
 
     diversity_cfg = cfg.get("diversity") or {}
     diversity_on = bool(diversity_cfg.get("enabled", False))
@@ -176,108 +216,187 @@ def run_generation(cfg: dict) -> dict:
                 last_error = e
                 logger.warning("task %s: metadata attempt %d/%d failed: %s",
                                task_id, attempt + 1, _METADATA_ATTEMPTS, e)
+                # Back off before retrying. Immediate retries were useless: both
+                # of task 244's attempts on 2026-08-17 landed inside the same
+                # 30-second login timeout window and failed identically, losing
+                # the task for the whole run.
+                if attempt + 1 < _METADATA_ATTEMPTS:
+                    time.sleep(_METADATA_RETRY_SECONDS * (attempt + 1))
         raise last_error
 
     def run_task(task_id) -> None:
-        logger.info("task %s: reading metadata", task_id)
+        on_disk = existing_trace_count(output_dir, task_id)
+        if on_disk >= traces_per_task:
+            # Reached across earlier passes. Skipping costs nothing and is what
+            # stops a task that keeps easily from running away with the set.
+            logger.info("task %s: already at target (%d/%d traces) — skipping",
+                        task_id, on_disk, traces_per_task)
+            with stats_lock:
+                summary_by_task[task_id] = {
+                    "task_id": task_id, "kept": 0, "traces_on_disk": on_disk,
+                    "target": traces_per_task, "episodes_run": 0,
+                    "plan_revisions": 0, "plan_similarity": 0.0,
+                    "outcome": "at target"}
+            return
+
+        logger.info("task %s: reading metadata (%d/%d traces on disk)",
+                    task_id, on_disk, traces_per_task)
         try:
             metadata = read_metadata(task_id)
         except Exception as e:
             logger.warning("task %s: metadata failed: %s — skipping", task_id, e)
             with stats_lock:
                 summary_by_task[task_id] = {
-                    "task_id": task_id, "kept": 0, "episodes_run": 0,
+                    "task_id": task_id, "kept": 0, "traces_on_disk": on_disk,
+                    "target": traces_per_task, "episodes_run": 0,
                     "plan_revisions": 0, "plan_similarity": 0.0,
                     "outcome": f"metadata error: {e}"}
             return
 
-        # Snapshot the history: refining against a list another thread is
-        # appending to would be a race, and a plan's diversity only needs to be
-        # measured against what was verified when it was written.
-        with history_lock:
-            history_snapshot = list(plan_history)
-
-        plan = propose_plan(planner, planner_cfg, prompts, metadata)
-        plan = refine_plan(planner, planner_cfg, prompts, metadata, plan,
-                           history_snapshot)
-
-        # Diversity gate: if the refined plan is near-verbatim of a recent one,
-        # force one explicit diversification pass and record what happened.
-        similarity = plan_similarity(plan, history_snapshot)
-        if diversity_on and similarity > max_similarity:
-            logger.info("task %s: plan too similar to a previous one (%.2f > %.2f) "
-                        "— diversifying", task_id, similarity, max_similarity)
-            plan = diversify_plan(planner, planner_cfg, prompts, metadata,
-                                  plan, history_snapshot)
-            similarity = plan_similarity(plan, history_snapshot)
-        logger.info("task %s: plan ready (%d chars, max similarity %.2f)",
-                    task_id, len(plan), similarity)
-
         kept_this_task = 0
         episodes_this_task = 0
+        similarity = 0.0
         outcome = "exhausted revisions"
 
-        for revision in range(max_revisions + 1):
-            result = run_episode(adapter, executor, episode_cfg, task_id,
-                                 (_temperature(revision, revision_temperatures)
-                                  if revision_temperatures else executor_temperature),
-                                 extra_fields={"plan": plan})
-            episodes_this_task += 1
-            with stats_lock:
-                totals["episodes"] += 1
+        # One plan cycle per trace. Re-planning rather than re-running the same
+        # plan is the point: N traces of one task are only worth having if they
+        # differ, and the diversity gate below measures each new plan against
+        # the ones already verified.
+        while on_disk + kept_this_task < traces_per_task:
+            # Snapshot the history: refining against a list another thread is
+            # appending to would be a race, and a plan's diversity only needs to
+            # be measured against what was verified when it was written.
+            with history_lock:
+                history_snapshot = list(plan_history)
 
-            if result["error"]:
-                logger.warning("task %s revision %d errored: %s",
-                               task_id, revision, result["error"])
-            if keep(result):
-                with save_lock:
-                    path = _save_trace(result, cfg, plan, revision,
-                                       _next_trace_n(output_dir, task_id), output_dir)
-                logger.info("task %s: verified and kept %s (revision %d)",
-                            task_id, path.name, revision)
-                kept_this_task = 1
+            plan = propose_plan(planner, planner_cfg, prompts, metadata)
+            plan = refine_plan(planner, planner_cfg, prompts, metadata, plan,
+                               history_snapshot)
+
+            # Diversity gate: if the refined plan is near-verbatim of a recent
+            # one, force one explicit diversification pass and record what
+            # happened.
+            similarity = plan_similarity(plan, history_snapshot)
+            if diversity_on and similarity > max_similarity:
+                logger.info("task %s: plan too similar to a previous one (%.2f > %.2f) "
+                            "— diversifying", task_id, similarity, max_similarity)
+                plan = diversify_plan(planner, planner_cfg, prompts, metadata,
+                                      plan, history_snapshot)
+                similarity = plan_similarity(plan, history_snapshot)
+            logger.info("task %s: plan ready (%d chars, max similarity %.2f), "
+                        "trace %d/%d", task_id, len(plan), similarity,
+                        on_disk + kept_this_task + 1, traces_per_task)
+
+            kept_this_plan = False
+            stop_task = False
+
+            for revision in range(max_revisions + 1):
+                result = run_episode(adapter, executor, episode_cfg, task_id,
+                                     (_temperature(revision, revision_temperatures)
+                                      if revision_temperatures else executor_temperature),
+                                     extra_fields={"plan": plan})
+                episodes_this_task += 1
                 with stats_lock:
-                    totals["kept"] += 1
-                outcome = f"kept at revision {revision}"
-                # Only plans that passed verification enter the diversity
-                # context — failed plans are noise, not templates to avoid.
-                with history_lock:
-                    plan_history.append(plan)
-                    del plan_history[:-history_size]
+                    totals["episodes"] += 1
+
+                if result["error"]:
+                    logger.warning("task %s revision %d errored: %s",
+                                   task_id, revision, result["error"])
+                if keep(result):
+                    with save_lock:
+                        path = _save_trace(result, cfg, plan, revision,
+                                           _next_trace_n(output_dir, task_id), output_dir)
+                    kept_this_task += 1
+                    logger.info("task %s: verified and kept %s (revision %d) "
+                                "— %d/%d traces", task_id, path.name, revision,
+                                on_disk + kept_this_task, traces_per_task)
+                    with stats_lock:
+                        totals["kept"] += 1
+                    outcome = f"kept {kept_this_task} this pass"
+                    kept_this_plan = True
+                    # Only plans that passed verification enter the diversity
+                    # context — failed plans are noise, not templates to avoid.
+                    with history_lock:
+                        plan_history.append(plan)
+                        del plan_history[:-history_size]
+                    break
+
+                report = build_failure_report(result)
+                logger.info("task %s revision %d failed verification:\n%s",
+                            task_id, revision, report)
+
+                # A destructive or one-shot task consumes its own precondition:
+                # once the record is deleted or created, no later revision can be
+                # proven to have done it. Retrying just burns GPU hours on
+                # episodes that can never be kept — stop and let the next
+                # (reseeded) pass retry. Such a task reaches its target one trace
+                # per reseed, which is why the target counts traces on disk.
+                if result.get("state_satisfied_before"):
+                    outcome = "goal consumed by an earlier episode — needs a reseed"
+                    logger.info("task %s: stopping revisions, %s", task_id, outcome)
+                    stop_task = True
+                    break
+
+                if revision < max_revisions:
+                    plan = revise_plan(planner, planner_cfg, prompts, metadata,
+                                       plan, report)
+
+            if stop_task:
                 break
-
-            report = build_failure_report(result)
-            logger.info("task %s revision %d failed verification:\n%s",
-                        task_id, revision, report)
-
-            # A destructive or one-shot task consumes its own precondition: once
-            # the record is deleted or created, no later revision can be proven
-            # to have done it. Retrying just burns GPU hours on episodes that
-            # can never be kept — stop and let the next (reseeded) pass retry.
-            if result.get("state_satisfied_before"):
-                outcome = "goal consumed by an earlier revision — needs a reseed"
-                logger.info("task %s: stopping revisions, %s", task_id, outcome)
+            if not kept_this_plan:
+                # A whole plan cycle failed every revision. Another fresh plan in
+                # the same pass would most likely fail the same way against the
+                # same environment state; stop here and let the next pass retry
+                # rather than burning the job's remaining GPU hours on it.
+                outcome = (f"exhausted revisions after keeping {kept_this_task}"
+                           if kept_this_task else "exhausted revisions")
                 break
-
-            if revision < max_revisions:
-                plan = revise_plan(planner, planner_cfg, prompts, metadata,
-                                   plan, report)
 
         with stats_lock:
             summary_by_task[task_id] = {
                 "task_id": task_id, "kept": kept_this_task,
+                "traces_on_disk": on_disk + kept_this_task,
+                "target": traces_per_task,
                 "episodes_run": episodes_this_task,
-                "plan_revisions": episodes_this_task - 1,
+                "plan_revisions": max(0, episodes_this_task - kept_this_task),
                 "plan_similarity": round(similarity, 3),
                 "outcome": outcome}
+
+    # Warm the metadata cache SERIALLY before any episode starts.
+    #
+    # Reading a task's goal and policies boots a browser and logs into SuiteCRM.
+    # With the cache cold, every worker thread does that at the same instant and
+    # the login form cannot serve them: on 2026-08-17 job 4845953 lost tasks 244
+    # and 247 outright — both metadata attempts timed out
+    # (`Locator.click: Timeout 30000ms exceeded`) inside the same login storm, so
+    # neither task ran a single episode and the run looked like an execution
+    # failure rather than a login one.
+    #
+    # One login at a time costs ~40s per uncached task ONCE (the cache is on
+    # disk and survives cycles), and removes the storm entirely — including the
+    # subtler version where a cache miss races an episode already in flight.
+    uncached = []
+    for task_id in task_ids:
+        if existing_trace_count(output_dir, task_id) >= traces_per_task:
+            continue  # nothing to generate, so nothing to read
+        try:
+            read_metadata(task_id)
+        except Exception as e:
+            logger.warning("task %s: metadata unavailable (%s) — it will be "
+                           "retried inside the run", task_id, e)
+            uncached.append(task_id)
+    if uncached:
+        logger.warning("metadata still missing for %s after the serial warm-up",
+                       uncached)
 
     # Every kept trace here is proven by a differential database check, so two
     # tasks reading the same tables must never be in flight together — their
     # writes would land inside each other's before/after comparison. Tasks that
     # read disjoint tables are chained separately and run in parallel.
     chains = group_into_chains(task_ids, group_of=adapter.state_collision_group)
-    logger.info("generating %d tasks in %d collision-free chains, concurrency %d",
-                len(task_ids), len(chains), concurrency)
+    logger.info("generating %d tasks to %d traces each, in %d collision-free "
+                "chains, concurrency %d",
+                len(task_ids), traces_per_task, len(chains), concurrency)
     run_chains(chains, run_task, concurrency)
 
     summary_rows = [summary_by_task[task_id] for task_id in task_ids
@@ -287,27 +406,40 @@ def run_generation(cfg: dict) -> dict:
     # Traces accumulate as trace_0, trace_1, ... across passes, so a single
     # summary.csv would silently overwrite every earlier pass's outcomes (it did,
     # twice, hiding which pass produced a keep). Keep a per-pass copy alongside.
+    summary_fields = ["task_id", "kept", "traces_on_disk", "target", "episodes_run",
+                      "plan_revisions", "plan_similarity", "outcome"]
     pass_id = os.environ.get("SLURM_JOB_ID")
     if pass_id:
         with open(output_dir / f"summary_pass_{pass_id}.csv", "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["task_id", "kept", "episodes_run",
-                                                   "plan_revisions", "plan_similarity",
-                                                   "outcome"])
+            writer = csv.DictWriter(f, fieldnames=summary_fields)
             writer.writeheader()
             writer.writerows(summary_rows)
 
     with open(output_dir / "summary.csv", "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["task_id", "kept", "episodes_run",
-                                               "plan_revisions", "plan_similarity",
-                                               "outcome"])
+        writer = csv.DictWriter(f, fieldnames=summary_fields)
         writer.writeheader()
         writer.writerows(summary_rows)
+
+    # How far the set is from its target shape, not just how much it grew. A pass
+    # that kept traces but left half the tasks short is not a finished set.
+    at_target = sum(1 for r in summary_rows if r["traces_on_disk"] >= traces_per_task)
+    short = sorted(r["task_id"] for r in summary_rows
+                   if r["traces_on_disk"] < traces_per_task)
 
     manifest["finished"] = datetime.now(timezone.utc).isoformat()
     manifest["kept"] = n_kept
     manifest["episodes"] = n_episodes
+    manifest["traces_per_task"] = traces_per_task
+    manifest["tasks_at_target"] = at_target
+    manifest["tasks_short_of_target"] = short
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
-    logger.info("generation done: kept %d verified traces from %d episodes → %s",
-                n_kept, n_episodes, output_dir)
-    return {"kept": n_kept, "episodes": n_episodes, "output_dir": str(output_dir)}
+    logger.info("generation done: kept %d verified traces from %d episodes; "
+                "%d/%d tasks at %d traces → %s",
+                n_kept, n_episodes, at_target, len(summary_rows), traces_per_task,
+                output_dir)
+    if short:
+        logger.info("tasks still short of target: %s", short)
+    return {"kept": n_kept, "episodes": n_episodes, "output_dir": str(output_dir),
+            "traces_per_task": traces_per_task, "tasks_at_target": at_target,
+            "tasks_short_of_target": short}

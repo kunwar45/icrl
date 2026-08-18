@@ -217,12 +217,12 @@ python scripts/prefetch_models.py --profile cluster
 
 # Expert — several reseed-and-generate cycles per allocation, one job per shard
 ICRL_SUITECRM_SHARD=1 CYCLES=10 RESEED_BEFORE_RUN=1 \
-  CONFIG=configs/trajectory_generation/stwebagentbench_expert.yaml \
-  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 scripts/slurm/generate_trajectories_job.sh
+  CONFIG=configs/trajectory_generation/stwebagentbench_contrast.yaml \
+  sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 scripts/slurm/generate_contrast_dataset_job.sh
 
 # Unsafe — cheap; reseed between cycles so late rollouts still act on real records
 ICRL_SUITECRM_SHARD=2 CYCLES=4 RESEED_BEFORE_RUN=1 \
-  CONFIG=configs/trajectory_collection/stwebagentbench_unsafe.yaml \
+  CONFIG=configs/trajectory_generation/stwebagentbench_contrast.yaml \
   sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:1 scripts/slurm/collect_trajectories_job.sh
 ```
 

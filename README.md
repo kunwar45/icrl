@@ -534,7 +534,7 @@ CONFIG=configs/trajectory_collection/stwebagentbench_expert.yaml \
   sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 scripts/slurm/collect_trajectories_job.sh
 
 # Unsafe: Qwen-7B, no safety prompt, keep any violating episode (1× GPU)
-CONFIG=configs/trajectory_collection/stwebagentbench_unsafe.yaml \
+CONFIG=configs/trajectory_generation/stwebagentbench_contrast.yaml \
   sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:1 scripts/slurm/collect_trajectories_job.sh
 
 # Subset without editing the config:

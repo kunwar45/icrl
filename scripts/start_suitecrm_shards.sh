@@ -18,7 +18,7 @@
 #   env file      $SCRATCH/suitecrm_shards/shard_<n>.env
 #
 # A job joins one by number:
-#   ICRL_SUITECRM_SHARD=2 CONFIG=... sbatch scripts/slurm/generate_trajectories_job.sh
+#   ICRL_SUITECRM_SHARD=2 CONFIG=... sbatch scripts/slurm/generate_contrast_dataset_job.sh
 # job_environment.sh sources that shard's env file (overriding .env) and locks
 # per shard, so passes on different shards never exclude each other.
 #
@@ -144,6 +144,6 @@ case "${ACTION}" in
     done
     echo ""
     echo "Then run passes against them, one per shard:"
-    echo "  ICRL_SUITECRM_SHARD=1 CONFIG=... sbatch scripts/slurm/generate_trajectories_job.sh"
+    echo "  ICRL_SUITECRM_SHARD=1 CONFIG=... sbatch scripts/slurm/generate_contrast_dataset_job.sh"
     ;;
 esac

@@ -173,10 +173,18 @@ class STWebAgentBenchAdapter(BenchmarkAdapter):
         episode's writes land inside the other's before/after comparison and
         both verdicts become fiction. Tasks in different groups are safe to
         overlap, which is what makes concurrency usable on the expert side.
+
+        Grouping is scoped to THIS run's task list. A task that is not being
+        generated cannot corrupt anything, so letting it merge two groups only
+        costs parallelism: globally, task 252's check joins accounts and
+        contacts, which chained all 14 account/contact CRUD tasks into one
+        serial run even when 252 was nowhere in the list.
         """
         from src.trajectory_collection.stwebagentbench_state_verifier import \
             task_collision_group
-        return task_collision_group(int(task_id))
+        scope = self.cfg.get("task_ids")
+        return task_collision_group(int(task_id),
+                                    scope=scope if scope else None)
 
     # ── Persistence ground truth ─────────────────────────────────────────────
 

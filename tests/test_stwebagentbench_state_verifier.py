@@ -8,7 +8,8 @@ stands in for SuiteCRM.
 import pytest
 
 from src.trajectory_collection.stwebagentbench_state_verifier import (
-    TASK_STATE_CHECKS, evaluate_checks, verify_task_state)
+    TASK_CHECK_ALIASES, TASK_STATE_CHECKS, checks_for_task, evaluate_checks,
+    task_collision_group, verify_task_state)
 
 
 def _counter(*counts):
@@ -232,3 +233,71 @@ def test_closing_an_unopened_connection_is_a_no_op():
 
     verifier.close_thread_connection()
     verifier.close_thread_connection()  # must not raise
+
+
+# ── Policy-density twins ──────────────────────────────────────────────────────
+# The benchmark ships each easy-tier task three times with escalating policy
+# density. The middle tier adds no contradicting policy, so its compliant end
+# state is the parent's and the parent's SQL verifies it — which is what makes
+# the dataset splittable without writing new checks.
+
+def test_each_alias_points_at_a_task_that_has_checks():
+    for twin, parent in TASK_CHECK_ALIASES.items():
+        assert TASK_STATE_CHECKS.get(parent), (
+            f"alias {twin} -> {parent}, but {parent} has no checks")
+
+
+def test_a_twin_resolves_to_its_parents_checks():
+    for twin, parent in TASK_CHECK_ALIASES.items():
+        assert checks_for_task(twin) == TASK_STATE_CHECKS[parent]
+
+
+def test_aliases_never_shadow_a_task_with_its_own_checks():
+    """A task with real checks must never be silently redirected to another's."""
+    overlap = set(TASK_CHECK_ALIASES) & set(TASK_STATE_CHECKS)
+    assert not overlap, f"these ids have both their own checks and an alias: {overlap}"
+
+
+def test_a_twin_shares_its_parents_collision_group():
+    """A twin writes the SAME rows as its parent, so the two must never be in
+    flight together — each one's writes would land inside the other's
+    before/after comparison and both verdicts would be fiction."""
+    for twin, parent in TASK_CHECK_ALIASES.items():
+        assert task_collision_group(twin) == task_collision_group(parent), (
+            f"twin {twin} may run concurrently with its parent {parent}")
+
+
+def test_top_tier_tasks_are_not_aliased():
+    """275-294 each add contradictions that move the goalpost (277 wants a
+    reassignment to 'bjones' and stage 'Closed Lost' before deletion; 284 wants
+    'Pending Input' rather than closed; 286 wants bulk updates assigned to
+    'bjones'). Reusing a parent's SQL there would verify the WRONG end state and
+    keep policy-violating traces."""
+    aliased_top_tier = sorted(t for t in TASK_CHECK_ALIASES if 275 <= t <= 294)
+    assert not aliased_top_tier, (
+        f"top-tier tasks {aliased_top_tier} need their own checks, not a parent's")
+
+
+def test_grouping_is_scoped_to_the_running_tasks():
+    """A task that is not being generated cannot corrupt anything, so it must
+    not chain two independent tasks together.
+
+    Task 246's check is table-wide over `leads` ("no lead is left in status
+    'New'"), so any concurrent write to that table moves its answer and it
+    chains with every other leads task. Scope it out of the run and those tasks
+    are free to overlap.
+    """
+    assert task_collision_group(62) == task_collision_group(246), (
+        "246 is table-wide over leads, so it must chain with 62 when both run")
+
+    scope = [62, 63, 64]  # the same leads tasks, without 246
+    groups = {task_collision_group(t, scope=scope) for t in scope}
+    assert len(groups) == 3, (
+        "scoped to a run without the table-wide 246, these name different "
+        f"records and must all be free to overlap, got {groups}")
+
+
+def test_scoping_never_breaks_a_real_collision():
+    """Tasks that genuinely share a table stay chained however the run is scoped."""
+    scope = [237, 247]  # both read `opportunities`
+    assert task_collision_group(237, scope=scope) == task_collision_group(247, scope=scope)

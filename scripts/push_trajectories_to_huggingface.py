@@ -65,19 +65,49 @@ def parse_args() -> argparse.Namespace:
     return ap.parse_args()
 
 
-def gate(trace: dict) -> list[str]:
-    """Reasons this trace must not be published; empty means it may be."""
+def _binding_violations(trace: dict) -> list[dict]:
+    """Violations judged over the ACTION SEQUENCE.
+
+    Page-scraped verdicts (`is_program_html` only) are excluded: they fire on
+    compliant agents that simply navigated away from the record, so they are
+    recorded on the trace but never binding.
+    """
+    return [v for v in (trace.get("safety_report") or [])
+            if v.get("violated")
+            and not (v.get("eval_types") and set(v["eval_types"]) <= {"is_program_html"})]
+
+
+def gate(trace: dict, set_name: str = "expert_synthetic") -> list[str]:
+    """
+    Reasons this trace must not be published; empty means it may be.
+
+    The bar is different for the two halves of a contrast dataset, and applying
+    the expert bar to an unsafe set rejects every trace for the very property
+    that qualifies it:
+
+      * EXPERT — the database must confirm the change (reward alone is not
+        proof, since the benchmark evaluator reads the page the agent left
+        behind) AND no policy may be violated.
+      * UNSAFE — at least one policy MUST be violated, judged over the action
+        sequence. There is no database check to demand: an unsafe run never
+        verifies persistence, so `state_verified` is None by design.
+    """
     problems = []
-    if trace.get("state_verified") is not True:
-        problems.append(
-            f"state_verified={trace.get('state_verified')!r} — the database did not "
-            "confirm this episode's change (reward alone is not proof)")
-    binding = [v for v in (trace.get("safety_report") or [])
-               if v.get("violated")
-               and not (v.get("eval_types") and set(v["eval_types"]) <= {"is_program_html"})]
-    if binding:
-        categories = ", ".join(sorted({v.get("policy_category", "?") for v in binding}))
-        problems.append(f"policy violations judged over the trajectory: {categories}")
+    binding = _binding_violations(trace)
+
+    if set_name == "unsafe":
+        if not binding:
+            problems.append(
+                "no policy violation judged over the trajectory — an unsafe trace "
+                "without a violation carries no signal for the constraint head")
+    else:
+        if trace.get("state_verified") is not True:
+            problems.append(
+                f"state_verified={trace.get('state_verified')!r} — the database did not "
+                "confirm this episode's change (reward alone is not proof)")
+        if binding:
+            categories = ", ".join(sorted({v.get("policy_category", "?") for v in binding}))
+            problems.append(f"policy violations judged over the trajectory: {categories}")
     # NOT checked: `terminated`. The runner ends an episode itself one step after
     # the database confirms the goal (otherwise the agent re-attempts finished
     # work and trips sequence policies), so the environment's own termination flag
@@ -85,7 +115,10 @@ def gate(trace: dict) -> list[str]:
     # signal — it distinguishes "stopped because done" from "ran out of steps".
     # Absent on traces written before that field existed; only its explicit False
     # is disqualifying.
-    if trace.get("finished_deliberately") is False:
+    # Only meaningful for expert traces. An unsafe episode has no goal it is
+    # supposed to reach, so running out of steps is not a defect — the violation
+    # it already committed is the signal.
+    if set_name != "unsafe" and trace.get("finished_deliberately") is False:
         problems.append("episode exhausted its step budget instead of finishing "
                         "when the goal was met")
     if not trace.get("steps"):
@@ -181,7 +214,7 @@ def main() -> int:
     rows, rejected = [], {}
     for path in paths:
         trace = json.loads(path.read_text())
-        problems = gate(trace)
+        problems = gate(trace, args.set)
         if problems:
             rejected[path.name] = problems
         else:

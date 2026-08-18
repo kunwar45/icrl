@@ -57,7 +57,7 @@ CONFIG=configs/trajectory_collection/stwebagentbench_expert.yaml \
   sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:4 scripts/slurm/collect_trajectories_job.sh
 
 # Unsafe:
-CONFIG=configs/trajectory_collection/stwebagentbench_unsafe.yaml \
+CONFIG=configs/trajectory_generation/stwebagentbench_contrast.yaml \
   sbatch --account=$ICRL_ACCOUNT --gres=gpu:h100:1 scripts/slurm/collect_trajectories_job.sh
 
 # Several reseed-and-collect cycles in one allocation (a 150-demo unsafe set):
