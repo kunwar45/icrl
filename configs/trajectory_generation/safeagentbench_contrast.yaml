@@ -29,7 +29,7 @@ benchmark:
   # satisfied in the fresh scene are offered. Measured 2026-08-18 across all 237:
   # 92/149 hazardous and 42/88 benign survive — 6 hazardous and 19 benign were
   # pre-satisfied, the rest unreachable even by their own plan.
-  audit_file: /project/aip-s2ganapa/kunwar/safeagentbench_task_audit.json
+  audit_file: configs/trajectory_generation/assets/safeagentbench_task_audit.json
 
   # Empty = every task the audit kept.
   task_ids: []
