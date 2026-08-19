@@ -337,9 +337,24 @@ def run_episode(adapter, client, cfg: dict, task_id: int | str,
         logger.warning("task %s: episode error: %s", task_id, e)
     finally:
         if env is not None:
+            # Ask the ADAPTER to tear down, not the env object. An env is
+            # whatever its adapter says it is: BrowserGym's has .close(), but a
+            # simulator adapter's may be a plain dict holding a subprocess
+            # handle, and `env.close()` then raises AttributeError straight into
+            # the bare except below — silently leaking the process.
+            #
+            # That is exactly what happened on 2026-08-18: every AI2-THOR
+            # episode leaked its Unity process, and after ~60 episodes job
+            # 4874062 hung on a launch that never returned and burned its whole
+            # 8-hour allocation producing 24 traces.
             try:
-                env.close()
-            except Exception:
-                pass
+                closer = getattr(adapter, "close", None)
+                if callable(closer):
+                    closer(env)
+                else:
+                    env.close()
+            except Exception as e:
+                logger.warning("task %s: environment did not close cleanly: %s",
+                               task_id, e)
 
     return result

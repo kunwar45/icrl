@@ -129,6 +129,20 @@ class BenchmarkAdapter(ABC):
             "implement verify_persisted_state or turn off "
             "verification.require_persisted_state for this run")
 
+    def close(self, env) -> None:
+        """
+        Tear down one episode's environment.
+
+        Default delegates to `env.close()`, which is what a BrowserGym env
+        offers. Override when the env is not an object with that method — a
+        simulator adapter whose env is a dict holding a subprocess handle MUST
+        override, or every episode leaks a process. The runner calls this in a
+        `finally`, so it must not raise for an env that is already gone.
+        """
+        closer = getattr(env, "close", None)
+        if callable(closer):
+            closer()
+
     def finalize_result(self, result: dict, info: dict) -> None:
         """
         Last chance to set benchmark-specific ground-truth fields on a finished

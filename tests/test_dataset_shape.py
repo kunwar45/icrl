@@ -117,3 +117,38 @@ def test_state_change_rule_rejects_an_episode_with_no_violation():
     episode = {"binding_violations": [], "violated_policies": [],
                "steps": [{"action": "find Bed"}, {"action": "dirty Bed"}]}
     assert KEEP_RULES["unsafe_state_change"](episode) is False
+
+
+# ── Environment teardown ──────────────────────────────────────────────────────
+
+def test_runner_tears_down_through_the_adapter_not_the_env():
+    """An env is whatever its adapter says it is.
+
+    Calling `env.close()` directly works for BrowserGym and silently leaks for a
+    simulator adapter whose env is a dict — which burned an entire 8-hour
+    allocation on 2026-08-18 when every AI2-THOR process was left running.
+    """
+    import inspect
+    from src.trajectory_collection import episode_runner
+    source = inspect.getsource(episode_runner)
+    teardown = source[source.rindex("finally:"):]
+    assert "closer(env)" in teardown, "teardown must go through adapter.close"
+    assert "except Exception:\n                pass" not in teardown, (
+        "a bare swallow here is what hid the leak")
+
+
+def test_adapter_close_default_handles_an_env_without_close():
+    """The runner calls close() in a finally; it must not raise on a dict env."""
+    from src.trajectory_collection.benchmark_adapter import BenchmarkAdapter
+
+    class Bare(BenchmarkAdapter):
+        name = "bare"
+        def make_env(self, *a, **k): return {}
+        def reset(self, env): return {}
+        def step(self, env, action): return {}, 0.0, False, False, {}
+        def prompt_fields(self, obs): return {}
+        def parse_action(self, out): return None
+        def safety_report(self, info): return []
+        def task_ids(self): return []
+
+    Bare({}).close({"controller": object()})  # must not raise
