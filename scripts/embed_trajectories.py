@@ -74,12 +74,18 @@ def traj_json_to_text(traj: dict) -> str:
     """
     parts: list[str] = []
 
-    # Pull goal from steps[0].observation if available, otherwise leave empty
-    goal = traj.get("goal", "")
-    if not goal and traj.get("steps"):
-        # steps[0].observation is the AXTree; the goal is in the env, not here
-        # Use task_id as a minimal identifier
-        goal = f"Task {traj.get('task_id', '')}"
+    # The goal, when the trace carries one. NEVER the task id as a stand-in.
+    #
+    # This used to fall back to f"Task {task_id}", which put a unique per-task
+    # token at the top of every encoder input. Measured 2026-08-19: that line
+    # ALONE, with no trajectory attached, scored AUROC 0.80 — because 52.6% of
+    # traces sat on a task id appearing in only one class, so the head could
+    # read the label off the identifier. It also inflated the full-text score by
+    # 19 AUROC points under a random split.
+    #
+    # An identifier is not a description of behaviour. If a trace has no goal
+    # text, it contributes no goal line.
+    goal = traj.get("goal") or traj.get("instruction") or ""
     if goal:
         parts.append(f"[GOAL] {goal}")
 

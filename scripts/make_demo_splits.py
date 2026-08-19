@@ -95,6 +95,35 @@ def cap_per_task(rows: list[dict], max_per_task: int, rng: random.Random):
     return kept, dropped
 
 
+def _choose_held_out_tasks(sources, held_out_frac: float,
+                           rng: random.Random) -> set[str]:
+    """
+    Pick the held-out task ids ONCE, across every label.
+
+    The split must be a property of the task, not of the label, or a task can
+    sit on both sides at once and the gate stops measuring generalisation.
+    """
+    tasks: set[str] = set()
+    for src in sources:
+        for row in load_rows(src):
+            tasks.add(str(row.get("task_instance_id", "?")))
+    ordered = sorted(tasks)
+    rng.shuffle(ordered)
+    n_held = max(1, round(len(ordered) * held_out_frac)) if ordered else 0
+    # Never hand every task to eval — training needs at least one.
+    n_held = min(n_held, max(0, len(ordered) - 1))
+    return set(ordered[:n_held])
+
+
+def apply_split(rows: list[dict], held_out_tasks: set[str]):
+    """Assign rows to train/held-out using an already-decided task list."""
+    held = [r for r in rows if str(r.get("task_instance_id", "?")) in held_out_tasks]
+    train = [r for r in rows if str(r.get("task_instance_id", "?")) not in held_out_tasks]
+    return (train, held,
+            sorted({str(r.get("task_instance_id", "?")) for r in train}),
+            sorted({str(r.get("task_instance_id", "?")) for r in held}))
+
+
 def split_by_task(rows: list[dict], held_out_frac: float, rng: random.Random):
     """Group by task_instance_id, then assign whole groups to train / held-out."""
     groups: dict[str, list[dict]] = defaultdict(list)
@@ -140,6 +169,17 @@ def main() -> int:
     rng = random.Random(args.seed)
     manifest: dict = {"seed": args.seed, "held_out_frac": args.held_out_frac, "labels": {}}
 
+    # ONE held-out task list, decided once and applied to BOTH labels.
+    #
+    # Splitting each label independently looks equivalent and is not: a task
+    # present in both classes can land in train for safe and in held-out for
+    # unsafe, so the gate scores traces of a task it trained on. Measured
+    # 2026-08-19, 37 task ids appeared in both classes on SafeAgentBench —
+    # 47% of the data — every one of them a contamination risk.
+    held_out_tasks = _choose_held_out_tasks(
+        [args.safe, args.unsafe], args.held_out_frac, rng)
+    manifest["held_out_task_ids"] = sorted(held_out_tasks)
+
     for label, src, train_out, eval_out in (
         ("safe", args.safe, args.train_dir / "safe.jsonl",
          args.eval_dir / "safe_held_out.jsonl"),
@@ -158,7 +198,7 @@ def main() -> int:
                   f"{len(dropped)} over-represented task(s) "
                   f"{sorted(dropped)}")
 
-        train, held, train_ids, held_ids = split_by_task(rows, args.held_out_frac, rng)
+        train, held, train_ids, held_ids = apply_split(rows, held_out_tasks)
 
         # A task under the floor is not fatal, but it is the thing that quietly
         # makes a held-out AUROC meaningless, so it is never left unsaid.

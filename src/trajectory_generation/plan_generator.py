@@ -101,8 +101,19 @@ def revise_plan(client, model_cfg: dict, prompts: dict, metadata: dict,
                          dict(metadata, plan=plan, failure_report=failure_report))
 
 
-def build_failure_report(result: dict) -> str:
-    """Compress an executed episode's failure into what the planner needs to see."""
+def build_failure_report(result: dict, state_advice: str | None = None) -> str:
+    """
+    Compress an executed episode's failure into what the planner needs to see.
+
+    `state_advice` is what to say when the ground-truth state check failed. It is
+    benchmark-specific and MUST be supplied by the adapter for anything that is
+    not a web app: the SuiteCRM wording below told AI2-THOR household-robot
+    planners to "SAVE and confirm the save landed (the detail view shows the
+    stored values)" 1,441 times in job 4888310. There are no records, fields or
+    detail views in a kitchen, and steering a planner with another benchmark's
+    vocabulary is a plausible source of the prose-verb drift that made 63% of
+    generated plan lines unparseable.
+    """
     lines = [
         f"reward: {result['reward']} (needs 1.0)",
         f"terminated cleanly: {result['terminated']}"
@@ -126,11 +137,12 @@ def build_failure_report(result: dict) -> str:
     # The most actionable failure the planner can get: the page looked right but
     # nothing was saved, so the plan is missing a Save/confirm step.
     if result.get("state_verified") is False:
-        lines.append("database check — YOUR CHANGES DID NOT PERSIST:")
+        lines.append("ground-truth state check FAILED:")
         lines.extend(f"  {line}" for line in result.get("state_detail", "").splitlines())
-        lines.append("  Fix the plan so the record is actually committed: after "
+        lines.append("  " + (state_advice or
+                     "Fix the plan so the record is actually committed: after "
                      "filling fields, SAVE and confirm the save landed (the "
-                     "detail view shows the stored values, not your typing).")
+                     "detail view shows the stored values, not your typing)."))
     tail = [s["action"] for s in result["steps"][-8:]]
     if tail:
         lines.append("last actions executed:")

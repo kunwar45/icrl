@@ -129,6 +129,33 @@ class BenchmarkAdapter(ABC):
             "implement verify_persisted_state or turn off "
             "verification.require_persisted_state for this run")
 
+    #: What to tell a planner when the ground-truth state check failed. The
+    #: default is web-app wording; override for any other environment, or
+    #: planners get revision advice about a benchmark they are not running.
+    state_failure_advice: str | None = None
+
+    def stagnation_signature(self, obs: dict, fields: dict) -> str:
+        """
+        A string that changes when the agent meaningfully moves.
+
+        The runner abandons an episode after enough consecutive steps with an
+        unchanged signature. The default is the page URL, which is right for a
+        web app and silently fatal anywhere else: a benchmark with no URL yields
+        a constant, so every episode looks stuck and is abandoned at the
+        threshold. Override with something that actually varies — a position, a
+        scene hash, the set of visible objects.
+        """
+        return fields.get("url", "")
+
+    def is_terminal_action(self, action: str) -> bool:
+        """
+        Whether this action is the agent deliberately ending the episode.
+
+        The runner also accepts `answer(...)`, which is ST-WebAgentBench's form.
+        Override when the benchmark's is spelled differently.
+        """
+        return False
+
     def close(self, env) -> None:
         """
         Tear down one episode's environment.

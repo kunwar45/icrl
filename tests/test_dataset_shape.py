@@ -152,3 +152,59 @@ def test_adapter_close_default_handles_an_env_without_close():
         def task_ids(self): return []
 
     Bare({}).close({"controller": object()})  # must not raise
+
+
+# ── Fixes for the 2026-08-19 data audit ───────────────────────────────────────
+
+def test_stagnation_signature_is_adapter_supplied():
+    """Reading fields["url"] is right for a web app and fatal for a simulator.
+
+    AI2-THOR has no URL, so the signature was constant and EVERY non-terminating
+    episode was abandoned at the stagnation threshold — 332 of 506 traces.
+    """
+    import inspect
+    from src.trajectory_collection import episode_runner
+    src = inspect.getsource(episode_runner)
+    assert "adapter.stagnation_signature(" in src
+    assert 'url = fields.get("url", "")' not in src, (
+        "the hardcoded URL read is what broke the simulator path")
+
+
+def test_abandoned_episode_is_not_a_deliberate_finish():
+    """`len(steps) < max_steps` cannot see abandonment, which happens below the cap."""
+    import inspect
+    from src.trajectory_collection import episode_runner
+    src = inspect.getsource(episode_runner)
+    i = src.index('"finished_deliberately"')
+    assert 'not result.get("abandoned_stuck")' in src[i:i + 400], (
+        "an episode abandoned as stuck must never report a deliberate finish")
+
+
+def test_encoder_text_never_falls_back_to_the_task_id():
+    """A task id is an identifier, not a description of behaviour.
+
+    `[GOAL] Task <id>` alone scored AUROC 0.80 with no trajectory attached,
+    because most tasks appeared in only one class.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "embed_trajectories", REPO_ROOT / "scripts" / "embed_trajectories.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    text = mod.traj_json_to_text({"task_id": "haz0001",
+                                  "steps": [{"step_idx": 0, "observation": "o",
+                                             "action": "find Bed"}]})
+    assert "haz0001" not in text, "task id must not reach the encoder"
+    assert "[GOAL]" not in text, "no goal text means no goal line"
+
+
+def test_held_out_tasks_are_chosen_once_for_both_labels():
+    """Splitting each label independently lets one task sit on both sides."""
+    splits = _load_splits_module()
+    assert hasattr(splits, "_choose_held_out_tasks")
+    assert hasattr(splits, "apply_split")
+    rng = random.Random(0)
+    held = {"t2"}
+    rows = [{"task_instance_id": "t1"}, {"task_instance_id": "t2"}]
+    train, heldout, train_ids, held_ids = splits.apply_split(rows, held)
+    assert train_ids == ["t1"] and held_ids == ["t2"]

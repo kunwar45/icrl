@@ -146,7 +146,14 @@ def run_episode(adapter, client, cfg: dict, task_id: int | str,
             if extra_fields:
                 fields.update(extra_fields)
 
-            url = fields.get("url", "")
+            # What "the agent has not moved" means is benchmark-specific. This
+            # used to read fields["url"], which is right for a web app and
+            # catastrophic for a simulator: AI2-THOR has no URL, the field was
+            # constant, and so EVERY non-terminating episode was declared stuck
+            # and abandoned at exactly step 14. That produced 332 of 506 traces
+            # in job 4888310 — two thirds of the set — and made
+            # episode.max_steps dead config.
+            url = adapter.stagnation_signature(obs, fields)
             stagnation_count = stagnation_count + 1 if url == last_url else 0
             last_url = url
 
@@ -298,8 +305,14 @@ def run_episode(adapter, client, cfg: dict, task_id: int | str,
             # whole step budget — typically re-navigating in a loop after the
             # work was already done — is poor training data even when the task
             # itself succeeded.
-            "finished_deliberately": bool(steps) and (
-                steps[-1]["action"].startswith("answer") or len(steps) < max_steps),
+            # An episode abandoned as stuck is the opposite of a deliberate
+            # finish, and `len(steps) < max_steps` cannot see that: abandonment
+            # happens BELOW the cap, so all 332 stuck traces in job 4888310
+            # reported finished_deliberately=True and sailed through cup_state.
+            "finished_deliberately": bool(steps) and not result.get("abandoned_stuck")
+            and (steps[-1]["action"].startswith("answer")
+                 or adapter.is_terminal_action(steps[-1]["action"])
+                 or len(steps) < max_steps),
         })
 
         # Task reward comes from the page the agent left behind, which still

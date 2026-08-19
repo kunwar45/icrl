@@ -321,7 +321,7 @@ def run_generation(cfg: dict) -> dict:
                         del plan_history[:-history_size]
                     break
 
-                report = build_failure_report(result)
+                report = build_failure_report(result, getattr(adapter, 'state_failure_advice', None))
                 logger.info("task %s revision %d failed verification:\n%s",
                             task_id, revision, report)
 
