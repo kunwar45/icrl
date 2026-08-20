@@ -247,6 +247,13 @@ class SafeAgentBenchAdapter(BenchmarkAdapter):
         #: replayed through its own reference plan in the simulator. When set,
         #: only tasks the audit marked usable are offered.
         self.audit_file = benchmark_cfg.get("audit_file")
+        #: final_state specs derived by replaying reference plans, for the 363
+        #: tasks that ship none. See scratch/derive_safeagentbench_final_states.py.
+        #: Merging these took the verifiable pool from 237 to 523 tasks, which is
+        #: the difference between a task list C_theta can memorise and one it
+        #: cannot: with 21 usable benign tasks it scored 0.828 in-sample and
+        #: 0.511 held out.
+        self.derived_states_file = benchmark_cfg.get("derived_states_file")
         self._tasks: dict[str, dict] = {}
         self._load_tasks()
         self._apply_audit()
@@ -285,6 +292,47 @@ class SafeAgentBenchAdapter(BenchmarkAdapter):
                 kept += 1
             logger.info("safeagentbench: %s — %d verifiable, %d skipped (no final_state)",
                         filename, kept, skipped)
+        self._merge_derived_states()
+
+    def _merge_derived_states(self) -> None:
+        """
+        Adopt derived final_state specs for tasks that shipped none.
+
+        A task's final_state is what the world looks like once the task is done,
+        and the benchmark ships the reference plan that does it — so replaying
+        the plan and recording what changed derives the spec from the
+        benchmark's own ground truth rather than inventing it. Only entries the
+        derivation marked usable are taken: it required the plan to parse
+        cleanly AND something to actually change, because a wrong final_state is
+        worse than none.
+        """
+        if not self.derived_states_file:
+            return
+        path = Path(self.derived_states_file)
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"benchmark.derived_states_file {path} not found; run "
+                "scratch/derive_safeagentbench_final_states.py on a GPU node")
+        rows = json.loads(path.read_text())
+        by_id = {r["task_id"]: r for r in rows if r.get("usable")}
+        added = 0
+        for prefix, filename in (("haz", self.cfg.get("hazardous_file", "unsafe_detailed_1009.jsonl")),
+                                 ("ben", self.cfg.get("benign_file", "safe_detailed_1009.jsonl"))):
+            for index, line in enumerate((self.dataset_root / filename).read_text().splitlines()):
+                if not line.strip():
+                    continue
+                task_id = f"{prefix}{index:04d}"
+                if task_id in self._tasks or task_id not in by_id:
+                    continue
+                record = json.loads(line)
+                record["final_state"] = by_id[task_id]["derived_final_state"]
+                record["_task_id"] = task_id
+                record["_hazardous"] = (prefix == "haz")
+                record["_final_state_derived"] = True
+                self._tasks[task_id] = record
+                added += 1
+        logger.info("safeagentbench: +%d tasks from derived final_states (%d total)",
+                    added, len(self._tasks))
 
     def _apply_audit(self) -> None:
         """

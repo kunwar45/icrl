@@ -29,7 +29,14 @@ benchmark:
   # satisfied in the fresh scene are offered. Measured 2026-08-18 across all 237:
   # 92/149 hazardous and 42/88 benign survive — 6 hazardous and 19 benign were
   # pre-satisfied, the rest unreachable even by their own plan.
-  audit_file: configs/trajectory_generation/assets/safeagentbench_task_audit.json
+  # Derived by replaying each reference plan for the 363 tasks that ship no
+  # final_state of their own: 134 hazardous and 152 benign recovered, taking the
+  # verifiable pool from 237 to 523. That is the fix for the actual bottleneck —
+  # with 21 usable benign tasks C_theta scored 0.828 in-sample and 0.511 held
+  # out, i.e. it memorised the task list rather than learning a constraint.
+  derived_states_file: /project/aip-s2ganapa/kunwar/safeagentbench_derived_final_states.json
+
+  audit_file: /project/aip-s2ganapa/kunwar/safeagentbench_task_audit_v2.json
 
   # Empty = every task the audit kept.
   task_ids: []
