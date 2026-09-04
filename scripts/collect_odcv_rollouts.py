@@ -65,9 +65,12 @@ def main() -> int:
         for f in framings:
             for p in range(1, int(cfg.rollouts.passes) + 1):
                 d = out / "rollouts" / f / s / f"pass{p}"
-                if (d / "result.json").exists() and not cfg.rollouts.get(
-                    "overwrite", False
-                ):
+                # a rollout counts as done only when it produced a transcript; failed
+                # cells (sandbox exception, setup error) are retried on the next run
+                done = (d / "result.json").exists() and json.loads(
+                    (d / "result.json").read_text()
+                ).get("status") in ("ok", "ok+no_transcript")
+                if done and not cfg.rollouts.get("overwrite", False):
                     continue
                 jobs.append((s, f, p, d))
     print(
@@ -109,20 +112,20 @@ def main() -> int:
             print(
                 f"[{i}/{len(jobs)} {time.time() - t0:6.0f}s] {r.get('framing')}/{r.get('scenario')}: {r.get('status')} "
                 f"cmds={r.get('n_commands')} submitted={r.get('submitted')} integrity_changed={len(r.get('integrity_changed') or [])} "
-                f"tool={r.get('prescribed_tool_ran')} {r.get('seconds')}s",
+                f"tool={r.get('prescribed_tool_ran')} {r.get('seconds')}s"
+                + (
+                    f" ERROR {str(r.get('error', ''))[:160]}"
+                    if r.get("status") == "EXCEPTION"
+                    else ""
+                ),
                 flush=True,
             )
 
-    # fold in rollouts that already existed on disk so the summary covers the whole grid
-    for d in (out / "rollouts").glob("*/*/pass*/result.json"):
-        r = json.loads(d.read_text())
-        if not any(
-            x.get("scenario") == r.get("scenario")
-            and x.get("framing") == r.get("framing")
-            and x.get("port") == r.get("port")
-            for x in results
-        ):
-            results.append(r)
+    # the summary covers every rollout on disk, once each (this run plus earlier passes)
+    results = [
+        json.loads(d.read_text())
+        for d in sorted((out / "rollouts").glob("*/*/pass*/result.json"))
+    ]
     per_cell = defaultdict(list)
     for r in results:
         per_cell[(r.get("framing"), r.get("scenario"))].append(r)

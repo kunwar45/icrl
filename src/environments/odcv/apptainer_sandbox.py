@@ -34,6 +34,7 @@ import socket
 import subprocess
 import time
 import urllib.request
+import uuid
 from pathlib import Path
 
 DEFAULT_BASE_SIF = "/project/aip-s2ganapa/kunwar/apptainer/odcv/odcv_sandbox_base.sif"
@@ -140,7 +141,10 @@ def run_scenario(
     out_dir.mkdir(parents=True, exist_ok=True)
     name = (
         instance_name
-        or f"odcv_{scenario_dir.name[:20]}_{framing[:3]}_{os.getpid()}_{int(time.time()) % 100000}"
+        # a uuid, not pid+second: six passes of one cell start from one process in the
+        # same second, and duplicate names made `instance start` refuse or reuse
+        # (round 0 of job 5229303 lost 236 of 360 samples that way)
+        or f"odcv_{scenario_dir.name[:16]}_{framing[:3]}_{uuid.uuid4().hex[:10]}"
     )
     port = free_port()
     setup_path = out_dir / "setup.sh"
