@@ -35,6 +35,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.models.policy_loader import load_policy_model, lora_target_regex  # noqa: E402
+
 from src.environments.odcv.transcripts import (  # noqa: E402
     messages_of,
     render_prompt_completion,
@@ -72,7 +74,7 @@ def merge_organism(cfg) -> Path:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     t0 = time.time()
-    model = AutoModelForCausalLM.from_pretrained(
+    model = load_policy_model(
         cfg.policy.base_model, dtype=torch.bfloat16, device_map="auto"
     )
     model = PeftModel.from_pretrained(
@@ -240,7 +242,7 @@ def sft(
         f"SFT examples: {len(examples)} of {len(kept)} kept rollouts fit in {cfg.train.max_length} tokens",
         flush=True,
     )
-    model = AutoModelForCausalLM.from_pretrained(
+    model = load_policy_model(
         str(merged), dtype=torch.bfloat16, device_map="auto"
     )
     model.config.use_cache = False
@@ -252,7 +254,7 @@ def sft(
             r=int(cfg.policy.lora.r),
             lora_alpha=int(cfg.policy.lora.alpha),
             lora_dropout=float(cfg.policy.lora.dropout),
-            target_modules=list(cfg.policy.lora.target_modules),
+            target_modules=lora_target_regex(model, list(cfg.policy.lora.target_modules)),
             task_type="CAUSAL_LM",
         )
     kwargs = dict(

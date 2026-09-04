@@ -29,6 +29,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.models.policy_loader import load_policy_model, lora_target_regex  # noqa: E402
+
 
 def load_pairs(path: Path):
     from datasets import Dataset
@@ -78,7 +80,7 @@ def main() -> int:
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     t0 = time.time()
-    model = AutoModelForCausalLM.from_pretrained(
+    model = load_policy_model(
         cfg.policy.base_model, dtype=torch.bfloat16, device_map="auto"
     )
     print(
@@ -96,7 +98,7 @@ def main() -> int:
         r=int(cfg.policy.lora.r),
         lora_alpha=int(cfg.policy.lora.alpha),
         lora_dropout=float(cfg.policy.lora.dropout),
-        target_modules=list(cfg.policy.lora.target_modules),
+        target_modules=lora_target_regex(model, list(cfg.policy.lora.target_modules)),
         task_type="CAUSAL_LM",
     )
     dpo_kwargs = dict(
