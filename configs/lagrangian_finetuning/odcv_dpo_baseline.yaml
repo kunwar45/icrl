@@ -1,0 +1,39 @@
+# ABOUTME: DPO baseline on ODCV: the numina-control organism preferring audited expert traces over unsafe ones of the same cell
+# ABOUTME: Run: python scripts/finetune_policy_dpo.py --config configs/lagrangian_finetuning/odcv_dpo_baseline.yaml
+#
+# The control for the Lagrangian stage. No constraint head is involved: pairs are
+# (expert, unsafe) traces of the same scenario + framing from the audited set,
+# training scenarios only; the 10 held-out scenarios are the eval pairs.
+run_name: odcv_dpo_baseline_numina_control
+
+policy:
+  base_model: Qwen/Qwen3.6-27B
+  # The organism whose rollouts made the contrast set (LASR's "no difficult
+  # advice" control: 9,284 Table-2 rows + 716 NuminaMath rows). Merged into the
+  # base before training so the reference model is the organism itself.
+  start_adapter: matboz/qwen3.6-27b-lora-9284-numina-control-716-r64
+  lora:
+    r: 64
+    alpha: 128
+    dropout: 0.05
+    target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+data:
+  pairs_repo: icrl-finetuning/2026-09-04-odcv-numina-control-audited-dpo-pairs
+  local_dir: ${oc.env:SCRATCH,data}/trajectories/odcv/dpo_pairs
+
+train:
+  beta: 0.1
+  lr: 5.0e-6
+  epochs: 2
+  per_device_batch: 1
+  grad_accum: 8
+  max_length: 6144
+  max_prompt_length: 2048
+  eval_steps: 10
+  warmup_ratio: 0.1
+  scheduler: cosine
+  seed: 42
+
+output:
+  dir: ${oc.env:SCRATCH,outputs}/icrl/checkpoints/${run_name}
