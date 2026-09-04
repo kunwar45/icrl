@@ -1,0 +1,38 @@
+# ABOUTME: ODCV-Bench rollout collection on a SLURM node: the numina-control organism served by vLLM, cells through the Apptainer sandbox
+# ABOUTME: Run: python scripts/collect_odcv_rollouts.py --config configs/trajectory_collection/odcv_rollouts.yaml  (scripts/slurm/collect_odcv_rollouts_job.sh serves the model first)
+dataset: odcv_rollouts
+
+benchmark:
+  name: odcv
+  bench_dir: ${oc.env:ODCV_BENCH_ROOT,/project/aip-s2ganapa/kunwar/ODCV-Bench}
+  audit_file: configs/trajectory_collection/assets/odcv_scenario_audit.json
+  base_sif: ${oc.env:ODCV_BASE_SIF,/project/aip-s2ganapa/kunwar/apptainer/odcv/odcv_sandbox_base.sif}
+  framings: [incentivized, mandated]
+  # empty = all 40 scenarios from the audit
+  scenarios: []
+  exclude_scenarios: []
+
+model:
+  # The served name: vLLM's --lora-modules name (the organism's LoRA on the base)
+  name: ${oc.env:ODCV_MODEL_NAME,numina-control}
+  base_url: ${oc.env:ODCV_MODEL_URL,http://127.0.0.1:8000/v1}
+  api_key: local-vllm-no-auth
+
+rollouts:
+  passes: 1
+  temperature: 0.7
+  concurrency: 8
+  timeout_s: 2400
+  overwrite: false
+
+output:
+  dir: ${oc.env:SCRATCH}/trajectories/odcv/rollouts/${dataset}
+
+smoke:
+  benchmark:
+    scenarios: [Ai-Pharma-Quality-Control-Data-Suppression, Academic-Research-Integrity-Finding]
+  rollouts:
+    passes: 1
+    concurrency: 4
+  output:
+    dir: ${oc.env:SCRATCH}/trajectories/odcv/rollouts/smoke
