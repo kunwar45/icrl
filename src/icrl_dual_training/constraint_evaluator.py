@@ -8,6 +8,7 @@ After training, unsafe trajectories should score HIGHER than safe ones.
 AUROC is computed with unsafe=1, safe=0 — so AUROC > 0.5 means the model
 is correctly assigning higher scores to unsafe trajectories.
 """
+
 import numpy as np
 import torch
 from sklearn.metrics import roc_auc_score, f1_score
@@ -21,11 +22,17 @@ class ConstraintEvaluator:
         self.model = model
 
     @torch.no_grad()
-    def score_trajectories(self, trajectories: list[Trajectory]) -> np.ndarray:
+    def score_trajectories(
+        self, trajectories: list[Trajectory], batch_size: int = 8
+    ) -> np.ndarray:
+        # Mini-batched: a single forward over every held-out trajectory at
+        # max_length tokens is what turned the 2026-09-04 ODCV gate into a
+        # 40-minute CPU job. embed_texts already batches the frozen backbone.
         self.model.eval()
-        texts  = [t.to_text() for t in trajectories]
-        scores = self.model(texts).cpu().numpy()
-        return scores
+        texts = [t.to_text() for t in trajectories]
+        pooled = self.model.embed_texts(texts, batch_size=batch_size)
+        scores = self.model.head(pooled).squeeze(-1)
+        return scores.detach().cpu().numpy()
 
     @torch.no_grad()
     def score_embeddings(self, embeddings: torch.Tensor) -> np.ndarray:
@@ -78,37 +85,41 @@ class ConstraintEvaluator:
     def _metrics(self, safe_scores: np.ndarray, unsafe_scores: np.ndarray) -> dict:
         scores = np.concatenate([safe_scores, unsafe_scores])
         # unsafe=1, safe=0 — AUROC > 0.5 means model assigns higher cost to unsafe
-        labels = np.concatenate([
-            np.zeros(len(safe_scores)),
-            np.ones(len(unsafe_scores)),
-        ])
+        labels = np.concatenate(
+            [
+                np.zeros(len(safe_scores)),
+                np.ones(len(unsafe_scores)),
+            ]
+        )
 
         auroc = roc_auc_score(labels, scores)
-        f1    = f1_score(labels, (scores >= 0.5).astype(int))
-        ece   = self._compute_ece(scores, labels)
+        f1 = f1_score(labels, (scores >= 0.5).astype(int))
+        ece = self._compute_ece(scores, labels)
 
         # Positive separation means unsafe scored higher than safe (correct direction)
         separation = float(unsafe_scores.mean() - safe_scores.mean())
 
         return {
-            "auroc":             float(auroc),
-            "f1":                float(f1),
-            "ece":               float(ece),
-            "separation":        separation,          # >0 is correct after training
+            "auroc": float(auroc),
+            "f1": float(f1),
+            "ece": float(ece),
+            "separation": separation,  # >0 is correct after training
             "unsafe_mean_score": float(unsafe_scores.mean()),
-            "safe_mean_score":   float(safe_scores.mean()),
-            "n_safe":            len(safe_scores),
-            "n_unsafe":          len(unsafe_scores),
+            "safe_mean_score": float(safe_scores.mean()),
+            "n_safe": len(safe_scores),
+            "n_unsafe": len(unsafe_scores),
         }
 
-    def _compute_ece(self, probs: np.ndarray, labels: np.ndarray, n_bins: int = 10) -> float:
+    def _compute_ece(
+        self, probs: np.ndarray, labels: np.ndarray, n_bins: int = 10
+    ) -> float:
         bin_boundaries = np.linspace(0, 1, n_bins + 1)
         ece = 0.0
         for lo, hi in zip(bin_boundaries[:-1], bin_boundaries[1:]):
             mask = (probs >= lo) & (probs < hi)
             if mask.sum() == 0:
                 continue
-            acc  = labels[mask].mean()
+            acc = labels[mask].mean()
             conf = probs[mask].mean()
             ece += mask.mean() * abs(acc - conf)
         return ece

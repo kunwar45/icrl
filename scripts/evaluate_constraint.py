@@ -16,9 +16,11 @@ Usage:
 
 Exit code 1 means the gate failed — do not proceed to fine-tuning.
 """
+
 # Make `src.*` importable when run as `python scripts/<name>.py` from anywhere.
 import sys as _sys
 from pathlib import Path as _Path
+
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
 
 import json
@@ -29,7 +31,10 @@ import torch
 import hydra
 from omegaconf import DictConfig
 
-from src.trajectory_embedding.trajectory_encoder import TrajectoryEncoder, load_constraint_head
+from src.trajectory_embedding.trajectory_encoder import (
+    TrajectoryEncoder,
+    load_constraint_head,
+)
 from src.icrl_dual_training.constraint_evaluator import ConstraintEvaluator
 from src.trajectory_data.trajectory import load_trajectories
 from src.models.model_loader import load_model_and_tokenizer
@@ -46,15 +51,19 @@ def main(cfg: DictConfig):
 
     head_path = constraint_head_path(cfg)
     if not os.path.exists(head_path):
-        print(f"No constraint head at {head_path}. Run scripts/train_constraint.py first.",
-              file=sys.stderr)
+        print(
+            f"No constraint head at {head_path}. Run scripts/train_constraint.py first.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     safe_path = data_path(cfg, cfg.data.eval_safe)
     unsafe_path = data_path(cfg, cfg.data.eval_unsafe)
     for p in (safe_path, unsafe_path):
         if not os.path.exists(p):
-            print(f"Missing {p}. Run: python scripts/make_demo_splits.py", file=sys.stderr)
+            print(
+                f"Missing {p}. Run: python scripts/make_demo_splits.py", file=sys.stderr
+            )
             sys.exit(1)
 
     backbone, tokenizer = load_model_and_tokenizer(
@@ -68,8 +77,16 @@ def main(cfg: DictConfig):
         max_length=cfg.constraint.encoder.max_length,
         head_hidden=cfg.constraint.encoder.head_hidden,
     )
-    load_constraint_head(constraint_model, head_path,
-                         model_name=cfg.constraint.encoder.model_name)
+    # train_constraint.py gets its device from accelerator.prepare; nothing
+    # here did, so the backbone scored every held-out trajectory on the CPU
+    # (job 5224797: GPU at 0%, 40+ minutes for 124 traces). Move it before the
+    # head is loaded — load_constraint_head places the head on the backbone's
+    # device.
+    if torch.cuda.is_available():
+        constraint_model.to("cuda")
+    load_constraint_head(
+        constraint_model, head_path, model_name=cfg.constraint.encoder.model_name
+    )
 
     evaluator = ConstraintEvaluator(constraint_model)
 
@@ -89,22 +106,28 @@ def main(cfg: DictConfig):
     passed = metrics["auroc"] >= gate
 
     print(json.dumps(metrics, indent=2))
-    print(f"\nGate: AUROC {metrics['auroc']:.3f} vs threshold {gate:.2f} — "
-          f"{'PASS' if passed else 'FAIL'}")
+    print(
+        f"\nGate: AUROC {metrics['auroc']:.3f} vs threshold {gate:.2f} — "
+        f"{'PASS' if passed else 'FAIL'}"
+    )
 
     out_dir = run_dir(cfg)
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "held_out_metrics.json")
     with open(out_path, "w") as f:
-        json.dump({
-            **metrics,
-            "auroc_gate": gate,
-            "passed": passed,
-            "safe_scores": [float(s) for s in safe_scores],
-            "unsafe_scores": [float(s) for s in unsafe_scores],
-            "safe_task_ids": [t.task_instance_id for t in safe_trajs],
-            "unsafe_task_ids": [t.task_instance_id for t in unsafe_trajs],
-        }, f, indent=2)
+        json.dump(
+            {
+                **metrics,
+                "auroc_gate": gate,
+                "passed": passed,
+                "safe_scores": [float(s) for s in safe_scores],
+                "unsafe_scores": [float(s) for s in unsafe_scores],
+                "safe_task_ids": [t.task_instance_id for t in safe_trajs],
+                "unsafe_task_ids": [t.task_instance_id for t in unsafe_trajs],
+            },
+            f,
+            indent=2,
+        )
     print(f"Held-out metrics saved: {out_path}")
 
     if not passed:
