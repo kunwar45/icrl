@@ -1,0 +1,62 @@
+# ABOUTME: Lagrangian rejection-sampling fine-tuning of the ODCV organism against the learned constraint head C_theta
+# ABOUTME: Run one round per SLURM job: ROUND auto from state.json; scripts/slurm/finetune_policy_lagrangian_rejection_sampling_job.sh
+#
+# Objective: max E[R] - lambda * E[C_theta], lambda by dual ascent on E[C_theta] - epsilon.
+# Each round: serve the current policy, sample K rollouts per TRAINING cell at
+# temperature T through the Apptainer sandbox, score R (submitted and ran the
+# prescribed tool) and C_theta (v2 head, actions-only text), keep the best
+# R - lambda*C per cell, fine-tune the LoRA on them, update lambda, save state.
+run_name: odcv_lagrangian_rs_v1
+
+policy:
+  base_model: Qwen/Qwen3.6-27B
+  start_adapter: matboz/qwen3.6-27b-lora-9284-numina-control-716-r64
+  # The organism merged into the base once (round 0) so every later round
+  # trains one LoRA on top of a fixed policy and vLLM serves merged + LoRA.
+  merged_dir: ${oc.env:SCRATCH}/icrl/models/qwen3.6-27b-numina-control-merged
+  lora:
+    r: 64
+    alpha: 128
+    dropout: 0.05
+    target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+constraint:
+  head_path: ${oc.env:SCRATCH}/icrl/checkpoints/odcv_numina_audited_v2_bce_actions/constraint_head.pt
+  encoder_model: Qwen/Qwen2.5-1.5B
+  max_length: 4096
+  epsilon: 0.15          # budget on mean C_theta of the policy's rollouts
+  lambda_init: 1.0
+  lambda_lr: 2.0
+  lambda_max: 10.0
+  keep_max_score: 0.5    # a kept rollout must score below this on C_theta
+
+rollouts:
+  bench_dir: ${oc.env:ODCV_BENCH_ROOT,/project/aip-s2ganapa/kunwar/ODCV-Bench}
+  audit_file: configs/trajectory_collection/assets/odcv_scenario_audit.json
+  base_sif: ${oc.env:ODCV_BASE_SIF,/project/aip-s2ganapa/kunwar/apptainer/odcv/odcv_sandbox_base.sif}
+  splits_file: ${oc.env:SCRATCH}/trajectories/odcv/numina_control_audited/split/splits.json   # held-out scenarios never trained on
+  samples_per_cell: 6
+  temperature: 0.7
+  concurrency: 8
+  timeout_s: 2400
+  keep_per_cell: 2
+  serve:
+    tensor_parallel: 2
+    gpus: "0,1"
+    max_model_len: 65536
+    max_num_seqs: 16
+    gpu_fraction: 0.90
+
+train:
+  lr: 1.0e-5
+  epochs: 1
+  per_device_batch: 1
+  grad_accum: 4
+  max_length: 6144
+  obs_chars: 1500        # tool-output slice kept in the training text
+  seed: 42
+
+rounds: 5
+
+output:
+  dir: ${oc.env:SCRATCH}/icrl/checkpoints/${run_name}
