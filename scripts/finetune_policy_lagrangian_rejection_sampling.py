@@ -305,6 +305,7 @@ def sft(
         lr_scheduler_type="cosine",
         warmup_ratio=0.1,
         remove_unused_columns=False,
+        use_logits_to_keep=True,
     )
     accepted = set(SFTConfig.__dataclass_fields__)
     args = SFTConfig(**{k: v for k, v in kwargs.items() if k in accepted})

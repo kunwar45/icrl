@@ -18,6 +18,20 @@ import re
 def load_policy_model(name_or_path: str, **kwargs):
     from transformers import AutoModelForCausalLM
 
+    # device_map="auto" packs the last GPU with layers AND the lm_head; a 6k-token
+    # DPO/SFT batch then materialises 6144 x 151k logits in fp32 on that GPU beside
+    # its layers (job 5229277: "unspecified launch failure" at the third eval pair).
+    # Cap every GPU well under its size so the head has room.
+    if kwargs.get("device_map") == "auto" and "max_memory" not in kwargs:
+        import torch
+
+        n = torch.cuda.device_count()
+        if n > 1:
+            free = min(torch.cuda.mem_get_info(i)[1] for i in range(n)) // (1024**3)
+            cap = max(8, int(free * 0.75))
+            kwargs["max_memory"] = {i: f"{cap}GiB" for i in range(n)}
+            kwargs["max_memory"]["cpu"] = "64GiB"
+
     try:
         from transformers import AutoModelForImageTextToText
 

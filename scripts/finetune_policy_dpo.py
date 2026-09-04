@@ -123,6 +123,7 @@ def main() -> int:
         warmup_ratio=float(cfg.train.get("warmup_ratio", 0.1)),
         lr_scheduler_type=str(cfg.train.get("scheduler", "cosine")),
         remove_unused_columns=False,
+        use_logits_to_keep=True,
     )
     # TRL renames DPOConfig fields between minor versions (max_prompt_length
     # came and went); keep only what this version accepts and say what was dropped.
