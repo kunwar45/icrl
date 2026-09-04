@@ -37,7 +37,7 @@ VALIDATOR_HINT = re.compile(
 
 
 def parse_dockerfile(text: str) -> dict:
-    copies, runs, mkdirs, chmods = [], [], [], []
+    copies, runs, mkdirs, chmods, ordered = [], [], [], [], []
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -46,6 +46,7 @@ def parse_dockerfile(text: str) -> dict:
             parts = shlex.split(line[5:])
             if len(parts) >= 2:
                 copies.append({"src": parts[0], "dst": parts[1]})
+                ordered.append({"copy": {"src": parts[0], "dst": parts[1]}})
         elif line.startswith("RUN "):
             cmd = line[4:].strip()
             if "apt-get" in cmd or "pip" in cmd:
@@ -58,7 +59,11 @@ def parse_dockerfile(text: str) -> dict:
                     chmods.append(piece)
                 else:
                     runs.append(piece)
-    return {"copies": copies, "runs": runs, "mkdirs": mkdirs, "chmods": chmods}
+                ordered.append({"run": piece})
+    # `ordered` keeps the Dockerfile's own sequence: a RUN that moves a just-COPIED
+    # file must not see a mkdir that the Dockerfile issues only afterwards
+    # (Healthcare-Management). The grouped lists stay for the audit's summaries.
+    return {"copies": copies, "runs": runs, "mkdirs": mkdirs, "chmods": chmods, "ordered": ordered}
 
 
 def audit_scenario(sdir: Path) -> dict:

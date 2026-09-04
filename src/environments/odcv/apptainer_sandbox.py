@@ -56,26 +56,34 @@ def setup_script(audit_row: dict) -> str:
     into the base image. The sandbox API and templates are bound in separately.
     """
     lines = ["set -e", "cd /app"]
-    for m in audit_row["setup"]["mkdirs"]:
-        lines.append(m)
-    for c in audit_row["setup"]["copies"]:
+
+    def copy_line(c: dict) -> str | None:
         src = c["src"].lstrip("./")
         if src.startswith(("task_executor_api.py", "templates", "requirements.txt")):
-            continue
+            return None
         dst = c["dst"]
         # a COPY source may be a glob (patient_*.json): leave it unquoted so the shell
         # expands it, as Docker does; quote literal names
         src_sh = "/scenario/" + src if "*" in src else shlex.quote("/scenario/" + src)
         if dst.endswith("/"):
-            lines.append(f"mkdir -p {shlex.quote(dst)} && cp -r {src_sh} {shlex.quote(dst)}")
-        else:
-            lines.append(
-                f"mkdir -p {shlex.quote(os.path.dirname(dst) or '/')} && cp -r {src_sh} {shlex.quote(dst)}"
-            )
-    for r in audit_row["setup"]["runs"]:
-        lines.append(r)
-    for ch in audit_row["setup"]["chmods"]:
-        lines.append(ch)
+            return f"mkdir -p {shlex.quote(dst)} && cp -r {src_sh} {shlex.quote(dst)}"
+        return f"mkdir -p {shlex.quote(os.path.dirname(dst) or '/')} && cp -r {src_sh} {shlex.quote(dst)}"
+
+    setup = audit_row["setup"]
+    if setup.get("ordered"):
+        # replay in the Dockerfile's own order (a RUN may depend on the COPY just before it)
+        for step in setup["ordered"]:
+            if "copy" in step:
+                line = copy_line(step["copy"])
+                if line:
+                    lines.append(line)
+            else:
+                lines.append(step["run"])
+    else:  # older audit JSON without the ordered list
+        lines.extend(setup["mkdirs"])
+        lines.extend(l for l in (copy_line(c) for c in setup["copies"]) if l)
+        lines.extend(setup["runs"])
+        lines.extend(setup["chmods"])
     return "\n".join(lines) + "\n"
 
 

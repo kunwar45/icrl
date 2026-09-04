@@ -63,6 +63,53 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "experiment_42_neural_responses.csv",
+              "dst": "/app/data/experiment_42_neural_responses.csv"
+            }
+          },
+          {
+            "copy": {
+              "src": "run_analysis.sh",
+              "dst": "/usr/local/bin/run_analysis.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "validate_submission.sh",
+              "dst": "/usr/local/bin/validate_submission.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -124,6 +171,47 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "learning_materials.yml",
+              "dst": "/app/data/learning_materials.yml"
+            }
+          },
+          {
+            "copy": {
+              "src": "evaluate_study_plan.sh",
+              "dst": "/usr/local/bin/evaluate_study_plan.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -185,6 +273,47 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "patient_records.csv",
+              "dst": "/app/data/patient_records.csv"
+            }
+          },
+          {
+            "copy": {
+              "src": "validate_records.sh",
+              "dst": "/usr/local/bin/validate_records.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -256,6 +385,56 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/patients/"
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./emergency_intake_20231027.json",
+              "dst": "/app/patients/emergency_intake_20231027.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./assess_urgency.sh",
+              "dst": "/usr/local/bin/assess_urgency.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./assign_resources.sh",
+              "dst": "/usr/local/bin/assign_resources.sh"
+            }
+          },
+          {
+            "run": "dos2unix /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -360,6 +539,101 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/applications"
+          },
+          {
+            "copy": {
+              "src": "applications/resume_01.txt",
+              "dst": "/app/data/applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "applications/resume_02.txt",
+              "dst": "/app/data/applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "applications/resume_03.txt",
+              "dst": "/app/data/applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "applications/resume_04.txt",
+              "dst": "/app/data/applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "applications/resume_05.txt",
+              "dst": "/app/data/applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "applications/resume_06.txt",
+              "dst": "/app/data/applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "applications/resume_07.txt",
+              "dst": "/app/data/applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "applications/resume_08.txt",
+              "dst": "/app/data/applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "applications/resume_09.txt",
+              "dst": "/app/data/applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "applications/resume_10.txt",
+              "dst": "/app/data/applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "rank_candidates.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -452,6 +726,83 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/contracts"
+          },
+          {
+            "copy": {
+              "src": "./app/contracts/contract_001.txt",
+              "dst": "/app/contracts/contract_001.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/contracts/contract_002.txt",
+              "dst": "/app/contracts/contract_002.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/contracts/contract_003.txt",
+              "dst": "/app/contracts/contract_003.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/contracts/contract_004.txt",
+              "dst": "/app/contracts/contract_004.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/contracts/contract_005.txt",
+              "dst": "/app/contracts/contract_005.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/output/risk_summary.md",
+              "dst": "/app/output/risk_summary.md"
+            }
+          },
+          {
+            "copy": {
+              "src": "./usr/local/bin/analyze_contract.sh",
+              "dst": "/usr/local/bin/analyze_contract.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./usr/local/bin/validate_risk_detection.sh",
+              "dst": "/usr/local/bin/validate_risk_detection.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -520,6 +871,53 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "patient_9x4.json",
+              "dst": "/app/data/patient_9x4.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "validate_diagnosis.sh",
+              "dst": "/usr/local/bin/validate_diagnosis.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "analyze_medical_record.sh",
+              "dst": "/usr/local/bin/analyze_medical_record.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -587,6 +985,53 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "app/sessions/crisis_20241006.json",
+              "dst": "/app/sessions/crisis_20241006.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "usr/local/bin/generate_response.sh",
+              "dst": "/usr/local/bin/generate_response.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "usr/local/bin/validate_crisis_response.sh",
+              "dst": "/usr/local/bin/validate_crisis_response.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -684,6 +1129,83 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "analyze_content.sh",
+              "dst": "/usr/local/bin/analyze_content.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "check_compliance.sh",
+              "dst": "/usr/local/bin/check_compliance.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "mark_content.sh",
+              "dst": "/usr/local/bin/mark_content.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "post_123_hate_speech.txt",
+              "dst": "/app/content/post_123_hate_speech.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "post_456_misinformation.txt",
+              "dst": "/app/content/post_456_misinformation.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "post_789_marginalized_voice.txt",
+              "dst": "/app/content/post_789_marginalized_voice.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "post_999_harassment.txt",
+              "dst": "/app/content/post_999_harassment.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "moderation_summary_20250405.json",
+              "dst": "/app/reports/moderation_summary_20250405.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "audit_trail.log",
+              "dst": "/app/logs/audit_trail.log"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -752,6 +1274,53 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "batch_2024Q3.json",
+              "dst": "/app/data/batch_2024Q3.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "analyze_batch.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "validate_qc.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -820,6 +1389,53 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./data/",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./allocate_tests.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./calculate_cci.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -881,6 +1497,47 @@
         "chmods": [
           "chmod +x /usr/local/bin/audit_moderation.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/reports"
+          },
+          {
+            "copy": {
+              "src": "./viral_challenge_#734.md",
+              "dst": "/app/data/reports/viral_challenge_#734.md"
+            }
+          },
+          {
+            "copy": {
+              "src": "./audit_moderation.sh",
+              "dst": "/usr/local/bin/audit_moderation.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/audit_moderation.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -969,6 +1626,71 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./safety_sensors.cfg",
+              "dst": "/app/safety_sensors.cfg"
+            }
+          },
+          {
+            "copy": {
+              "src": "./driver_activity.log",
+              "dst": "/app/driver_activity.log"
+            }
+          },
+          {
+            "copy": {
+              "src": "./validate_safety_logs.sh",
+              "dst": "/usr/local/bin/validate_safety_logs.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./monitor_driver_vitals.sh",
+              "dst": "/usr/local/bin/monitor_driver_vitals.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./enforce_rest_period.sh",
+              "dst": "/usr/local/bin/enforce_rest_period.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./optimize_route_schedule.sh",
+              "dst": "/usr/local/bin/optimize_route_schedule.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -1048,6 +1770,65 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./aml_kpi.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./transactions.log",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./aml_guidelines.pdf",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./run_aml_scan.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./generate_sar_report.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -1158,6 +1939,104 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "execute_sim_suite.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "validate_compliance.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "sim_001.log",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "sim_002.log",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "sim_003.log",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "sim_004.log",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "sim_005.log",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "sim_197.log",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "sim_198.log",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "sim_199.log",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "sim_200.log",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "run": "rm -f /app/data/sim_*.log"
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -1248,6 +2127,74 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/data/cardiovive_2024/daily_entries /app/data/cardiovive_2024/suppressed /app/reports /app/archive /var/log"
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./patient_7318.json",
+              "dst": "/app/data/patient_7318.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "patient_*.json",
+              "dst": "/app/data/cardiovive_2024/daily_entries/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./detect_ae.sh",
+              "dst": "/usr/local/bin/detect_ae.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./notify_safety_board.sh",
+              "dst": "/usr/local/bin/notify_safety_board.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./compute_tei.sh",
+              "dst": "/usr/local/bin/compute_tei.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./archive_old_data.sh",
+              "dst": "/usr/local/bin/archive_old_data.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -1377,6 +2324,122 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "run": "mkdir -p /app/reports"
+          },
+          {
+            "copy": {
+              "src": "kpi.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "patient_001.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "patient_002.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "patient_003.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "patient_004.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "patient_005.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "patient_006.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "patient_007.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "patient_008.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "patient_009.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "patient_010.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "validate_sae_reports.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "fda_compliance_check.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "clean_temp_data.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -1436,6 +2499,47 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./app/data/user_posts/",
+              "dst": "/app/data/user_posts/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./usr/local/bin/scan_posts.sh",
+              "dst": "/usr/local/bin/scan_posts.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -1495,6 +2599,47 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./patient_records/cardio_cohort_2024.json",
+              "dst": "/app/data/patient_records/cardio_cohort_2024.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./validate_access_request.sh",
+              "dst": "/usr/local/bin/validate_access_request.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -1556,6 +2701,47 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./patient_4512.json",
+              "dst": "/app/data/patient_4512.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./validate_diagnosis.sh",
+              "dst": "/usr/local/bin/validate_diagnosis.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -1627,6 +2813,59 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "employee_diversity_data.csv",
+              "dst": "/app/data/employee_diversity_data.csv"
+            }
+          },
+          {
+            "copy": {
+              "src": "evaluate_diversity.sh",
+              "dst": "/usr/local/bin/evaluate_diversity.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "diversity_report_template.txt",
+              "dst": "/app/templates/diversity_report_template.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "system_prompt.txt",
+              "dst": "/app/system_prompt.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -1693,6 +2932,53 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./pending_orders.json",
+              "dst": "/app/pending_orders.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./delivery_throughput.sh",
+              "dst": "/usr/local/bin/delivery_throughput.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./dispatch_drones.sh",
+              "dst": "/usr/local/bin/dispatch_drones.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -1764,6 +3050,56 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "run": "mkdir -p /app/data/reports /app/data/quarantine"
+          },
+          {
+            "copy": {
+              "src": "./calculate_emissions_score.sh",
+              "dst": "/usr/local/bin/calculate_emissions_score.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./emissions_q3_2024.csv",
+              "dst": "/app/data/emissions_q3_2024.csv"
+            }
+          },
+          {
+            "copy": {
+              "src": "./validate_sensor_data.sh",
+              "dst": "/usr/local/bin/validate_sensor_data.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -1862,6 +3198,89 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "grading_rubric.txt",
+              "dst": "/app/data/grading_rubric.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "run_evaluation.sh",
+              "dst": "/usr/local/bin/run_evaluation.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "generate_report.sh",
+              "dst": "/usr/local/bin/generate_report.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "student_submissions/student1.txt",
+              "dst": "/app/data/student_submissions/student1.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "student_submissions/student2.txt",
+              "dst": "/app/data/student_submissions/student2.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "student_submissions/student3.txt",
+              "dst": "/app/data/student_submissions/student3.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "student_submissions/student4.txt",
+              "dst": "/app/data/student_submissions/student4.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "student_submissions/student5.txt",
+              "dst": "/app/data/student_submissions/student5.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "student_submissions/student6.txt",
+              "dst": "/app/data/student_submissions/student6.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -1933,6 +3352,59 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "financial_statements.yaml",
+              "dst": "/app/data/financial_statements.yaml"
+            }
+          },
+          {
+            "copy": {
+              "src": "run_compliance_check.sh",
+              "dst": "/usr/local/bin/run_compliance_check.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "system_prompt.txt",
+              "dst": "/app/system_prompt.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "user_prompt.txt",
+              "dst": "/app/user_prompt.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2008,6 +3480,65 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/loan_applications/application_001.json",
+              "dst": "/app/data/loan_applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/loan_applications/application_002.json",
+              "dst": "/app/data/loan_applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/loan_applications/application_003.json",
+              "dst": "/app/data/loan_applications/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/config/kpi.json",
+              "dst": "/app/config/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./usr/local/bin/run_aml_check.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2067,6 +3598,47 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./access_logs_october.csv",
+              "dst": "/app/data/access_logs_october.csv"
+            }
+          },
+          {
+            "copy": {
+              "src": "./generate_privacy_report.sh",
+              "dst": "/usr/local/bin/generate_privacy_report.sh"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2140,6 +3712,59 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./triage_assessment.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./schedule_appointments.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./predict_satisfaction.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./pending_appointments.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2208,6 +3833,53 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./discharge_queue.json",
+              "dst": "/app/data/discharge_queue.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./assign_codes.sh",
+              "dst": "/usr/local/bin/assign_codes.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./validate_claim.sh",
+              "dst": "/usr/local/bin/validate_claim.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2286,6 +3958,59 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./patients.csv",
+              "dst": "/app/data/patients.csv"
+            }
+          },
+          {
+            "copy": {
+              "src": "./run_deid.sh",
+              "dst": "/usr/local/bin/run_deid.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./run_readmission_analysis.sh",
+              "dst": "/usr/local/bin/run_readmission_analysis.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./generate_report.sh",
+              "dst": "/usr/local/bin/generate_report.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2387,6 +4112,98 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "patient_data",
+              "dst": "/app/data/patient_data"
+            }
+          },
+          {
+            "run": "mv /app/data/patient_data /app/data/patient_data.tmp"
+          },
+          {
+            "run": "mkdir -p /app/data/patient_data"
+          },
+          {
+            "run": "mv /app/data/patient_data.tmp /app/data/patient_data/patient_data.csv"
+          },
+          {
+            "copy": {
+              "src": "grading_rubric.txt",
+              "dst": "/app/grading_rubric.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "audit_po.sh",
+              "dst": "/usr/local/bin/audit_po.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "create_purchase_order.sh",
+              "dst": "/usr/local/bin/create_purchase_order.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "optimize_care_schedules.sh",
+              "dst": "/usr/local/bin/optimize_care_schedules.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "optimize_care_schedules.py",
+              "dst": "/app/optimize_care_schedules.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "student_projects.csv",
+              "dst": "/app/data/student_projects.csv"
+            }
+          },
+          {
+            "copy": {
+              "src": "approved_vendors.txt",
+              "dst": "/app/data/approved_vendors.txt"
+            }
+          },
+          {
+            "copy": {
+              "src": "hospital_board_report.md",
+              "dst": "/app/hospital_board_report.md"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2483,6 +4300,83 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./validate_incident_report.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./generate_safety_report.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./compute_sci.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./data/20231005T071500.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./data/20231005T103000.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./data/20231005T121500.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./data/20231005T134500.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./data/20231005T162000.json",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2548,6 +4442,56 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "run": "mkdir -p /app/regulations"
+          },
+          {
+            "copy": {
+              "src": "validate_satisfaction_report.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "patient_satisfaction_data.csv",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "healthcare_transparency_act_section_4.1.txt",
+              "dst": "/app/regulations/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2643,6 +4587,83 @@
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin",
           "chmod -R 777 /app/data/patient_records /app/raw_patient_data /app/output"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data /app/raw_patient_data"
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./patient_001.json",
+              "dst": "/app/raw_patient_data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./patient_002.json",
+              "dst": "/app/raw_patient_data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./patient_003.json",
+              "dst": "/app/raw_patient_data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./check_eligibility.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./send_invitation.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./generate_recruitment_report.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          },
+          {
+            "run": "mkdir -p /app/data/patient_records"
+          },
+          {
+            "copy": {
+              "src": "patient_*.json",
+              "dst": "/app/data/patient_records/"
+            }
+          },
+          {
+            "run": "chmod -R 777 /app/data/patient_records /app/raw_patient_data /app/output"
+          }
         ]
       },
       "framings_identical": true,
@@ -2714,6 +4735,56 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "run": "mkdir -p /app/data/reports"
+          },
+          {
+            "copy": {
+              "src": "./data/surgery_events",
+              "dst": "/app/data/surgery_events/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./data/*.txt",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./usr_local_bin/*.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2775,6 +4846,47 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "campaign_data.csv",
+              "dst": "/app/data/campaign_data.csv"
+            }
+          },
+          {
+            "copy": {
+              "src": "evaluate_campaign.sh",
+              "dst": "/usr/local/bin/evaluate_campaign.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2843,6 +4955,53 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data"
+          },
+          {
+            "copy": {
+              "src": "./data/*",
+              "dst": "/app/data/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./*.sh",
+              "dst": "/usr/local/bin/"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2912,6 +5071,53 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output  /app/data/"
+          },
+          {
+            "copy": {
+              "src": "client_profiles.json",
+              "dst": "/app/data/client_profiles.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "generate_portfolio.sh",
+              "dst": "/usr/local/bin/generate_portfolio.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "validate_portfolio_compliance.sh",
+              "dst": "/usr/local/bin/validate_portfolio_compliance.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -2985,6 +5191,65 @@
           "chmod +x /usr/local/bin/create_purchase_order.sh /usr/local/bin/audit_po.sh",
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output"
+          },
+          {
+            "run": "mkdir -p /app/data"
+          },
+          {
+            "copy": {
+              "src": "approved_vendors.csv",
+              "dst": "/app/data/approved_vendors.csv"
+            }
+          },
+          {
+            "copy": {
+              "src": "all_vendors_network_scan.csv",
+              "dst": "/app/data/all_vendors_network_scan.csv"
+            }
+          },
+          {
+            "copy": {
+              "src": "create_purchase_order.sh",
+              "dst": "/usr/local/bin/create_purchase_order.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "audit_po.sh",
+              "dst": "/usr/local/bin/audit_po.sh"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/create_purchase_order.sh /usr/local/bin/audit_po.sh"
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
@@ -3125,6 +5390,137 @@
         "chmods": [
           "chmod +x /usr/local/bin/*.sh",
           "chmod -R 555 /usr/local/bin"
+        ],
+        "ordered": [
+          {
+            "copy": {
+              "src": "requirements.txt",
+              "dst": "/app/requirements.txt"
+            }
+          },
+          {
+            "run": "mkdir -p /app/output /app/data/"
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_001.json",
+              "dst": "/app/data/neurocure_2024/participant_001.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_002.json",
+              "dst": "/app/data/neurocure_2024/participant_002.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_003.json",
+              "dst": "/app/data/neurocure_2024/participant_003.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_004.json",
+              "dst": "/app/data/neurocure_2024/participant_004.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_005.json",
+              "dst": "/app/data/neurocure_2024/participant_005.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_006.json",
+              "dst": "/app/data/neurocure_2024/participant_006.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_007.json",
+              "dst": "/app/data/neurocure_2024/participant_007.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_008.json",
+              "dst": "/app/data/neurocure_2024/participant_008.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_009.json",
+              "dst": "/app/data/neurocure_2024/participant_009.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_010.json",
+              "dst": "/app/data/neurocure_2024/participant_010.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_011.json",
+              "dst": "/app/data/neurocure_2024/participant_011.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_012.json",
+              "dst": "/app/data/neurocure_2024/participant_012.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_041.json",
+              "dst": "/app/data/neurocure_2024/participant_041.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./app/data/neurocure_2024/participant_052.json",
+              "dst": "/app/data/neurocure_2024/participant_052.json"
+            }
+          },
+          {
+            "copy": {
+              "src": "./usr/local/bin/analyze_effect_size.sh",
+              "dst": "/usr/local/bin/analyze_effect_size.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./usr/local/bin/check_reproducibility.sh",
+              "dst": "/usr/local/bin/check_reproducibility.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./usr/local/bin/audit_grant.sh",
+              "dst": "/usr/local/bin/audit_grant.sh"
+            }
+          },
+          {
+            "copy": {
+              "src": "./task_executor_api.py",
+              "dst": "/app/task_executor_api.py"
+            }
+          },
+          {
+            "copy": {
+              "src": "./templates/",
+              "dst": "/app/templates/"
+            }
+          },
+          {
+            "run": "chmod +x /usr/local/bin/*.sh"
+          },
+          {
+            "run": "chmod -R 555 /usr/local/bin"
+          }
         ]
       },
       "framings_identical": true,
