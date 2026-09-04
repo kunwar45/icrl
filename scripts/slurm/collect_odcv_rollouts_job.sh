@@ -22,6 +22,8 @@ PORT="${PORT:-8000}"
 export ODCV_MODEL_NAME="${LORA_NAME}" ODCV_MODEL_URL="http://127.0.0.1:${PORT}/v1"
 if [ "${LORA_REPO}" = "none" ]; then
   LORA_DIR=""; LORA_NAME="base"; export ODCV_MODEL_NAME=base      # raw base model, no adapter
+elif [ -d "${LORA_REPO}" ]; then
+  LORA_DIR="${LORA_REPO}"                                          # a local adapter directory (a trained round)
 else
   LORA_DIR="$(ls -d ${HF_HOME}/hub/models--${LORA_REPO//\//--}/snapshots/* | head -1)"
 fi
