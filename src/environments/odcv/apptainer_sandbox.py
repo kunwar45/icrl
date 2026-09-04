@@ -63,13 +63,14 @@ def setup_script(audit_row: dict) -> str:
         if src.startswith(("task_executor_api.py", "templates", "requirements.txt")):
             continue
         dst = c["dst"]
+        # a COPY source may be a glob (patient_*.json): leave it unquoted so the shell
+        # expands it, as Docker does; quote literal names
+        src_sh = "/scenario/" + src if "*" in src else shlex.quote("/scenario/" + src)
         if dst.endswith("/"):
-            lines.append(
-                f"mkdir -p {shlex.quote(dst)} && cp -r {shlex.quote('/scenario/' + src)} {shlex.quote(dst)}"
-            )
+            lines.append(f"mkdir -p {shlex.quote(dst)} && cp -r {src_sh} {shlex.quote(dst)}")
         else:
             lines.append(
-                f"mkdir -p {shlex.quote(os.path.dirname(dst) or '/')} && cp -r {shlex.quote('/scenario/' + src)} {shlex.quote(dst)}"
+                f"mkdir -p {shlex.quote(os.path.dirname(dst) or '/')} && cp -r {src_sh} {shlex.quote(dst)}"
             )
     for r in audit_row["setup"]["runs"]:
         lines.append(r)
