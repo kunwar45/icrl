@@ -29,9 +29,11 @@ Usage:
         constraint.encoder.safe_embeddings_path=embeddings/safe.pt \
         constraint.encoder.unsafe_embeddings_path=embeddings/unsafe.pt
 """
+
 # Make `src.*` importable when run as `python scripts/<name>.py` from anywhere.
 import sys as _sys
 from pathlib import Path as _Path
+
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
 
 import json
@@ -42,7 +44,10 @@ import torch
 import hydra
 from omegaconf import DictConfig
 
-from src.trajectory_embedding.trajectory_encoder import TrajectoryEncoder, save_constraint_head
+from src.trajectory_embedding.trajectory_encoder import (
+    TrajectoryEncoder,
+    save_constraint_head,
+)
 from src.icrl_dual_training.constraint_trainer import ICRLTrainer
 from src.icrl_dual_training.constraint_evaluator import ConstraintEvaluator
 from src.trajectory_data.trajectory import load_trajectories
@@ -83,7 +88,9 @@ def main(cfg: DictConfig):
     policy_path = data_path(cfg, cfg.data.train_unsafe)
     for p in (expert_path, policy_path):
         if not os.path.exists(p):
-            print(f"Missing {p}. Run: python scripts/make_demo_splits.py", file=sys.stderr)
+            print(
+                f"Missing {p}. Run: python scripts/make_demo_splits.py", file=sys.stderr
+            )
             sys.exit(1)
 
     expert_trajs = load_trajectories(expert_path)
@@ -93,7 +100,9 @@ def main(cfg: DictConfig):
 
     # ── Cached embeddings (optional) ──────────────────────────────────────────
     expert_embs = _load_embeddings(cfg.constraint.encoder.safe_embeddings_path, "safe")
-    policy_embs = _load_embeddings(cfg.constraint.encoder.unsafe_embeddings_path, "unsafe")
+    policy_embs = _load_embeddings(
+        cfg.constraint.encoder.unsafe_embeddings_path, "unsafe"
+    )
 
     # ── Build encoder ─────────────────────────────────────────────────────────
     print(f"Loading backbone: {cfg.constraint.encoder.model_name}")
@@ -107,6 +116,7 @@ def main(cfg: DictConfig):
         tokenizer=tokenizer,
         max_length=cfg.constraint.encoder.max_length,
         head_hidden=cfg.constraint.encoder.head_hidden,
+        text_mode=cfg.constraint.encoder.get("text_mode", "full"),
     )
     ctheta = accelerator.prepare(ctheta)
 
@@ -114,7 +124,7 @@ def main(cfg: DictConfig):
     trainer = ICRLTrainer(
         ctheta=ctheta,
         expert_trajs=expert_trajs,
-        policy_trajs=policy_trajs,      # offline mode: fixed policy pool
+        policy_trajs=policy_trajs,  # offline mode: fixed policy pool
         beta=cfg.constraint.icrl.beta,
         lambda_c=cfg.constraint.icrl.lambda_c,
         n_constraint_steps=cfg.constraint.training.n_constraint_steps,
@@ -126,6 +136,7 @@ def main(cfg: DictConfig):
         run_name=cfg.run_name,
         expert_embeddings=expert_embs,
         policy_embeddings=policy_embs,
+        loss_kind=cfg.constraint.icrl.get("loss", "icrl"),
     )
 
     trained = trainer.train(n_iterations=cfg.constraint.training.n_iterations)
@@ -135,7 +146,8 @@ def main(cfg: DictConfig):
     if expert_embs is not None and policy_embs is not None:
         # Identical numbers without a second pass over the frozen backbone.
         metrics = evaluator.evaluate_embeddings(
-            trainer.expert_embeddings, trainer.policy_embeddings,
+            trainer.expert_embeddings,
+            trainer.policy_embeddings,
         )
     else:
         metrics = evaluator.evaluate(expert_trajs, policy_trajs)
@@ -144,7 +156,8 @@ def main(cfg: DictConfig):
     # ── Save head ─────────────────────────────────────────────────────────────
     ckpt_path = constraint_head_path(cfg)
     save_constraint_head(
-        trained, ckpt_path,
+        trained,
+        ckpt_path,
         model_name=cfg.constraint.encoder.model_name,
         max_length=cfg.constraint.encoder.max_length,
     )
@@ -158,9 +171,11 @@ def main(cfg: DictConfig):
     # The real gate runs on the held-out split:
     #   python scripts/evaluate_constraint.py ... run_name=<same run_name>
     if metrics["auroc"] < cfg.constraint.evaluation.auroc_gate:
-        print(f"NOTE: train AUROC {metrics['auroc']:.3f} is below the "
-              f"{cfg.constraint.evaluation.auroc_gate} gate — the held-out gate "
-              f"will almost certainly fail too.")
+        print(
+            f"NOTE: train AUROC {metrics['auroc']:.3f} is below the "
+            f"{cfg.constraint.evaluation.auroc_gate} gate — the held-out gate "
+            f"will almost certainly fail too."
+        )
 
 
 if __name__ == "__main__":

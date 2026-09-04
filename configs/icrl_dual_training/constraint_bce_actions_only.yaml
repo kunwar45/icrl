@@ -1,0 +1,39 @@
+# @package _global_
+# ABOUTME: Hydra icrl_dual_training group: BCE-trained constraint head on actions-only text (the ODCV-selected config)
+# ABOUTME: Used by: python scripts/train_constraint.py +icrl_dual_training=constraint_bce_actions_only (also evaluate_constraint.py)
+#
+# Selected 2026-09-04 by a 4-fold scenario sweep on the audited ODCV contrast
+# set (scratch/sweep_odcv_constraint_heads.py): dropping observations from the
+# encoder text and training the head with BCE lifted within-scenario held-out
+# AUROC from 0.72 (regex level) to 0.81 over 12 folds, overall 0.84 vs 0.76.
+# The 7B encoder did not beat the 1.5B on actions-only text.
+constraint:
+  encoder:
+    model_name: Qwen/Qwen2.5-1.5B
+    max_length: 4096
+    head_hidden: 256
+    text_mode: actions_only
+    safe_embeddings_path: null
+    unsafe_embeddings_path: null
+
+  training:
+    # 20 x 50 = 1000 head steps at batch 8 per class; more overfits (ECE rises).
+    n_iterations: 20
+    n_constraint_steps: 50
+    batch_size: 8
+    lr: 1.0e-4
+    weight_decay: 0.01
+    rollouts_per_iter: 10
+    policy_buffer_size: 500
+    eval_every: 5
+
+  icrl:
+    loss: bce
+    beta: 0.8       # unused by bce; kept so the logging line still reads
+    lambda_c: 1.0
+
+  evaluation:
+    auroc_gate: 0.75
+    ece_gate: 0.10
+
+  head_path: null

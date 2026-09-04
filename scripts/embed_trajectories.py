@@ -41,6 +41,7 @@ Load with:
     bundle = torch.load("embeddings/safe.pt", weights_only=False)
     embs   = bundle["embeddings"]   # (N, H)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -62,7 +63,8 @@ logger = logging.getLogger(__name__)
 
 # ── Text serialisation ────────────────────────────────────────────────────────
 
-def traj_json_to_text(traj: dict) -> str:
+
+def traj_json_to_text(traj: dict, mode: str = "full") -> str:
     """
     Convert a task_*_trace_*.json dict to a single string for the encoder.
 
@@ -71,6 +73,9 @@ def traj_json_to_text(traj: dict) -> str:
         [POLICIES] policy1 | policy2 | ...
         [STEP 0] [OBS] <axtree> [ACTION] <action>
         [STEP 1] ...
+
+    mode="actions_only" drops the [OBS] fields — see Trajectory.to_text for
+    why (tool output swamps the mean-pool on bash-agent transcripts).
     """
     parts: list[str] = []
 
@@ -106,26 +111,31 @@ def traj_json_to_text(traj: dict) -> str:
         idx = step.get("step_idx", "?")
         obs = step.get("observation", "").strip()
         action = step.get("action", "").strip()
-        parts.append(f"[STEP {idx}] [OBS] {obs} [ACTION] {action}")
+        if mode == "actions_only":
+            parts.append(f"[STEP {idx}] [ACTION] {action}")
+        else:
+            parts.append(f"[STEP {idx}] [OBS] {obs} [ACTION] {action}")
 
     return "\n".join(parts)
 
 
-def jsonl_traj_to_text(traj: dict) -> str:
+def jsonl_traj_to_text(traj: dict, mode: str = "full") -> str:
     """
     Convert an old-format JSONL trajectory dict (from data/demos/) to text.
-    Mirrors Trajectory.to_text().
+    Mirrors Trajectory.to_text(mode).
     """
     parts: list[str] = []
     for step in traj.get("steps", []):
         action = step.get("action", "")
         obs = step.get("observation", "")
         parts.append(f"[ACTION] {action}")
-        parts.append(f"[OBS] {obs}")
+        if mode != "actions_only":
+            parts.append(f"[OBS] {obs}")
     return " ".join(parts)
 
 
 # ── File loading ──────────────────────────────────────────────────────────────
+
 
 def load_traj_jsons(input_dir: Path, label: str) -> list[dict]:
     """Load task_*_trace_*.json files. Each file = one trajectory."""
@@ -169,37 +179,82 @@ def load_traj_jsonls(jsonl_path: Path, is_safe: bool) -> list[dict]:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Pre-compute trajectory embeddings with a frozen Qwen backbone",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--input-dir", type=Path, default=None,
-                        help="Directory of task_*_trace_*.json files (new format)")
-    parser.add_argument("--jsonl", type=Path, default=None,
-                        help="Path to a *.jsonl file (old data/demos/ format)")
-    parser.add_argument("--label", choices=["safe", "unsafe"], required=True,
-                        help="Whether these trajectories are safe or unsafe demos")
-    parser.add_argument("--output", type=Path, required=True,
-                        help="Output .pt file path")
-    parser.add_argument("--model", default="Qwen/Qwen2.5-1.5B",
-                        help="HuggingFace model ID (default: Qwen/Qwen2.5-1.5B)")
-    parser.add_argument("--max-length", type=int, default=2048,
-                        help="Token limit per trajectory (default: 2048)")
-    parser.add_argument("--head-hidden", type=int, default=256,
-                        help="MLP head hidden size (default: 256)")
-    parser.add_argument("--batch-size", type=int, default=8,
-                        help="Encoding batch size (default: 8; raise for multi-GPU)")
-    parser.add_argument("--device", default=None,
-                        help="Force device: cuda / cpu / mps (default: auto)")
-    parser.add_argument("--flash-attn", action="store_true",
-                        help="Use flash_attention_2 (A100/H100 only)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Load model and print stats without encoding")
+    parser.add_argument(
+        "--input-dir",
+        type=Path,
+        default=None,
+        help="Directory of task_*_trace_*.json files (new format)",
+    )
+    parser.add_argument(
+        "--jsonl",
+        type=Path,
+        default=None,
+        help="Path to a *.jsonl file (old data/demos/ format)",
+    )
+    parser.add_argument(
+        "--label",
+        choices=["safe", "unsafe"],
+        required=True,
+        help="Whether these trajectories are safe or unsafe demos",
+    )
+    parser.add_argument(
+        "--output", type=Path, required=True, help="Output .pt file path"
+    )
+    parser.add_argument(
+        "--model",
+        default="Qwen/Qwen2.5-1.5B",
+        help="HuggingFace model ID (default: Qwen/Qwen2.5-1.5B)",
+    )
+    parser.add_argument(
+        "--text-mode",
+        choices=["full", "actions_only"],
+        default="full",
+        help="serialisation given to the backbone; must match the head trained on "
+        "these embeddings (constraint.encoder.text_mode)",
+    )
+    parser.add_argument(
+        "--max-length",
+        type=int,
+        default=2048,
+        help="Token limit per trajectory (default: 2048)",
+    )
+    parser.add_argument(
+        "--head-hidden",
+        type=int,
+        default=256,
+        help="MLP head hidden size (default: 256)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=8,
+        help="Encoding batch size (default: 8; raise for multi-GPU)",
+    )
+    parser.add_argument(
+        "--device", default=None, help="Force device: cuda / cpu / mps (default: auto)"
+    )
+    parser.add_argument(
+        "--flash-attn",
+        action="store_true",
+        help="Use flash_attention_2 (A100/H100 only)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Load model and print stats without encoding",
+    )
     args = parser.parse_args()
 
     if args.input_dir is None and args.jsonl is None:
-        parser.error("Provide --input-dir (new JSON format) or --jsonl (old JSONL format)")
+        parser.error(
+            "Provide --input-dir (new JSON format) or --jsonl (old JSONL format)"
+        )
 
     import torch
     from src.trajectory_embedding.trajectory_encoder import load_qwen_encoder
@@ -216,27 +271,32 @@ def main():
     encoder.eval()
 
     backbone_device = next(encoder.backbone.parameters()).device
-    logger.info("Backbone device: %s  bfloat16: %s",
-                backbone_device,
-                next(encoder.backbone.parameters()).dtype == torch.bfloat16)
+    logger.info(
+        "Backbone device: %s  bfloat16: %s",
+        backbone_device,
+        next(encoder.backbone.parameters()).dtype == torch.bfloat16,
+    )
 
     if args.dry_run:
         # Encode one dummy text to verify the pipeline end-to-end
         dummy = "[GOAL] test [STEP 0] [OBS] hello [ACTION] click('1')"
         with torch.no_grad():
             emb = encoder._mean_pool([dummy])
-        logger.info("Dry-run embedding shape: %s  dtype: %s", tuple(emb.shape), emb.dtype)
+        logger.info(
+            "Dry-run embedding shape: %s  dtype: %s", tuple(emb.shape), emb.dtype
+        )
         logger.info("Dry-run OK — exiting without writing output.")
         return
 
     # ── Load trajectories ─────────────────────────────────────────────────────
     if args.input_dir is not None:
         trajs = load_traj_jsons(args.input_dir, args.label)
-        texts = [traj_json_to_text(t) for t in trajs]
+        texts = [traj_json_to_text(t, args.text_mode) for t in trajs]
     else:
         is_safe = args.label == "safe"
         trajs = load_traj_jsonls(args.jsonl, is_safe)
-        texts = [jsonl_traj_to_text(t) for t in trajs]
+        texts = [jsonl_traj_to_text(t, args.text_mode) for t in trajs]
+    logger.info("Text mode: %s", args.text_mode)
 
     if not trajs:
         logger.error("No trajectories found — nothing to encode.")
@@ -247,8 +307,9 @@ def main():
     # Count trajectories that will hit the token cap (rough estimate: 4 chars/token)
     cap_chars = args.max_length * 4
     n_truncated = sum(1 for t in texts if len(t) > cap_chars)
-    logger.info("Approx. truncated (>%d chars): %d / %d",
-                cap_chars, n_truncated, len(texts))
+    logger.info(
+        "Approx. truncated (>%d chars): %d / %d", cap_chars, n_truncated, len(texts)
+    )
 
     # ── Encode ───────────────────────────────────────────────────────────────
     logger.info("Encoding in batches of %d ...", args.batch_size)
@@ -272,17 +333,23 @@ def main():
         "label": args.label,
         "model_name": args.model,
         "max_length": args.max_length,
+        "text_mode": args.text_mode,
         "n_tokens_truncated": n_truncated,
         "texts": texts,  # keep so you can sanity-check what was encoded
     }
     torch.save(bundle, args.output)
-    logger.info("Saved → %s  (%d embeddings, dim=%d)",
-                args.output, len(trajs), embeddings_cpu.shape[1])
+    logger.info(
+        "Saved → %s  (%d embeddings, dim=%d)",
+        args.output,
+        len(trajs),
+        embeddings_cpu.shape[1],
+    )
 
     # Quick stats
     mean_norm = embeddings_cpu.norm(dim=1).mean().item()
-    logger.info("Embedding L2 norm mean: %.3f  (typical Qwen2.5-1.5B: ~100-150)",
-                mean_norm)
+    logger.info(
+        "Embedding L2 norm mean: %.3f  (typical Qwen2.5-1.5B: ~100-150)", mean_norm
+    )
 
 
 if __name__ == "__main__":

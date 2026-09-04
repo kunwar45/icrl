@@ -44,6 +44,7 @@ The AUROC gate is reported but not enforced by default — the pipeline is worth
 verifying even while the safe demos are still poor. Pass --strict-gate to stop
 the run when the gate fails.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -58,8 +59,17 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-STAGES = ["preflight", "splits", "encode", "constraint", "gate",
-          "eval_base", "finetune", "eval_tuned", "plots"]
+STAGES = [
+    "preflight",
+    "splits",
+    "encode",
+    "constraint",
+    "gate",
+    "eval_base",
+    "finetune",
+    "eval_tuned",
+    "plots",
+]
 
 # ── Profiles ──────────────────────────────────────────────────────────────────
 # Each profile supplies Hydra overrides shared by every stage, plus a few
@@ -143,11 +153,14 @@ PROFILES: dict[str, dict] = {
 
 # ── Stage runner ──────────────────────────────────────────────────────────────
 
+
 class StageFailure(RuntimeError):
     pass
 
 
-def run_cmd(cmd: list[str], *, dry_run: bool, allow_fail: bool = False) -> tuple[int, float]:
+def run_cmd(
+    cmd: list[str], *, dry_run: bool, allow_fail: bool = False
+) -> tuple[int, float]:
     printable = " ".join(shlex.quote(c) for c in cmd)
     print(f"\n$ {printable}\n", flush=True)
     if dry_run:
@@ -212,6 +225,7 @@ def python_bin() -> str:
 
 # ── Override assembly ─────────────────────────────────────────────────────────
 
+
 def common_overrides(profile: dict, args) -> list[str]:
     ov = [
         "+icrl_dual_training=constraint_default",
@@ -258,19 +272,31 @@ def stage_preflight(args, profile, results):
     # perfectly valid CPU/GPU-only job on a browser it never opens.
     needs_browser = bool(ROLLOUT_STAGES & set(args.selected_stages))
 
-    cmd = [python_bin(), "scripts/run_preflight_checks.py",
-           "--backend", profile["env_backend"],
-           "--encoder-model", profile["encoder_model"],
-           "--policy-model", profile["policy_model"],
-           "--demos", args.safe_demos, args.unsafe_demos,
-           "--task-ids", *profile["train_task_ids"], *profile["eval_task_ids"]]
+    cmd = [
+        python_bin(),
+        "scripts/run_preflight_checks.py",
+        "--backend",
+        profile["env_backend"],
+        "--encoder-model",
+        profile["encoder_model"],
+        "--policy-model",
+        profile["policy_model"],
+        "--demos",
+        args.safe_demos,
+        args.unsafe_demos,
+        "--task-ids",
+        *profile["train_task_ids"],
+        *profile["eval_task_ids"],
+    ]
     if not needs_browser:
         cmd.append("--skip-browser")
     if profile["env_backend"] == "stwebagent":
         cmd.append("--require-gpu")
     code, elapsed = run_cmd(cmd, dry_run=args.dry_run, allow_fail=True)
-    results["preflight"] = {"status": "ok" if code == 0 else "failed",
-                            "seconds": elapsed}
+    results["preflight"] = {
+        "status": "ok" if code == 0 else "failed",
+        "seconds": elapsed,
+    }
     if code != 0:
         raise StageFailure(
             "preflight found blocking problems (above). Fix them, or skip this "
@@ -280,12 +306,22 @@ def stage_preflight(args, profile, results):
 
 
 def stage_splits(args, profile, results):
-    cmd = [python_bin(), "scripts/make_demo_splits.py",
-           "--safe", args.safe_demos, "--unsafe", args.unsafe_demos,
-           "--train-dir", os.path.join(args.data_root, "train"),
-           "--eval-dir", os.path.join(args.data_root, "eval"),
-           "--manifest", os.path.join(args.data_root, "splits.json"),
-           "--seed", str(args.seed)]
+    cmd = [
+        python_bin(),
+        "scripts/make_demo_splits.py",
+        "--safe",
+        args.safe_demos,
+        "--unsafe",
+        args.unsafe_demos,
+        "--train-dir",
+        os.path.join(args.data_root, "train"),
+        "--eval-dir",
+        os.path.join(args.data_root, "eval"),
+        "--manifest",
+        os.path.join(args.data_root, "splits.json"),
+        "--seed",
+        str(args.seed),
+    ]
     if args.demo_limit:
         cmd += ["--limit", str(args.demo_limit)]
     _, elapsed = run_cmd(cmd, dry_run=args.dry_run)
@@ -299,19 +335,41 @@ def stage_encode(args, profile, results):
         return
     emb_dir = Path(args.embeddings_dir)
     total = 0.0
-    for label, jsonl in (("safe", os.path.join(args.data_root, "train", "safe.jsonl")),
-                         ("unsafe", os.path.join(args.data_root, "train", "unsafe.jsonl"))):
+    for label, jsonl in (
+        ("safe", os.path.join(args.data_root, "train", "safe.jsonl")),
+        ("unsafe", os.path.join(args.data_root, "train", "unsafe.jsonl")),
+    ):
         out = emb_dir / f"{label}.pt"
-        cmd = [python_bin(), "scripts/embed_trajectories.py",
-               "--jsonl", jsonl, "--label", label, "--output", str(out),
-               "--model", profile["encoder_model"],
-               "--max-length", _override_value(profile, "constraint.encoder.max_length", "2048"),
-               "--batch-size", str(args.encode_batch_size)]
+        cmd = [
+            python_bin(),
+            "scripts/embed_trajectories.py",
+            "--jsonl",
+            jsonl,
+            "--label",
+            label,
+            "--output",
+            str(out),
+            "--model",
+            profile["encoder_model"],
+            "--max-length",
+            _override_value(
+                profile, "constraint.encoder.max_length", "2048", args.override
+            ),
+            "--text-mode",
+            _override_value(
+                profile, "constraint.encoder.text_mode", "full", args.override
+            ),
+            "--batch-size",
+            str(args.encode_batch_size),
+        ]
         _, elapsed = run_cmd(cmd, dry_run=args.dry_run)
         total += elapsed
-    results["encode"] = {"status": "ok", "seconds": total,
-                         "safe": str(emb_dir / "safe.pt"),
-                         "unsafe": str(emb_dir / "unsafe.pt")}
+    results["encode"] = {
+        "status": "ok",
+        "seconds": total,
+        "safe": str(emb_dir / "safe.pt"),
+        "unsafe": str(emb_dir / "unsafe.pt"),
+    }
 
 
 def stage_constraint(args, profile, results):
@@ -328,19 +386,31 @@ def stage_constraint(args, profile, results):
 
 def stage_gate(args, profile, results):
     ov = common_overrides(profile, args)
-    code, elapsed = run_cmd(hydra_cmd("evaluate_constraint.py", ov),
-                            dry_run=args.dry_run, allow_fail=not args.strict_gate)
-    metrics = _read_json(Path(args.checkpoint_dir) / args.run_name / "held_out_metrics.json")
+    code, elapsed = run_cmd(
+        hydra_cmd("evaluate_constraint.py", ov),
+        dry_run=args.dry_run,
+        allow_fail=not args.strict_gate,
+    )
+    metrics = _read_json(
+        Path(args.checkpoint_dir) / args.run_name / "held_out_metrics.json"
+    )
     passed = bool(metrics.get("passed")) if metrics else code == 0
-    results["gate"] = {"status": "ok" if code == 0 else "gate_failed",
-                       "seconds": elapsed, "passed": passed,
-                       "auroc": metrics.get("auroc") if metrics else None}
+    results["gate"] = {
+        "status": "ok" if code == 0 else "gate_failed",
+        "seconds": elapsed,
+        "passed": passed,
+        "auroc": metrics.get("auroc") if metrics else None,
+    }
     if code != 0:
-        print("\n!! Constraint gate FAILED. Continuing anyway (pass --strict-gate "
-              "to stop here). Downstream numbers are pipeline checks, not results.\n")
+        print(
+            "\n!! Constraint gate FAILED. Continuing anyway (pass --strict-gate "
+            "to stop here). Downstream numbers are pipeline checks, not results.\n"
+        )
 
 
-def _eval_stage(args, profile, results, key: str, run_suffix: str, policy_path: str | None):
+def _eval_stage(
+    args, profile, results, key: str, run_suffix: str, policy_path: str | None
+):
     ov = common_overrides(profile, args)
     ov = [o for o in ov if not o.startswith("run_name=")]
     ov.append(f"run_name={args.run_name}_{run_suffix}")
@@ -388,18 +458,29 @@ def stage_plots(args, profile, results):
         write_run_report(results, args)
 
     out_dir = os.path.join(args.log_dir, args.run_name, "plots")
-    cmd = [python_bin(), "scripts/make_experiment_plots.py",
-           "--run-name", args.run_name,
-           "--log-dir", args.log_dir,
-           "--checkpoint-dir", args.checkpoint_dir,
-           "--out-dir", out_dir,
-           "--theme", args.plot_theme,
-           "--allow-empty"]
+    cmd = [
+        python_bin(),
+        "scripts/make_experiment_plots.py",
+        "--run-name",
+        args.run_name,
+        "--log-dir",
+        args.log_dir,
+        "--checkpoint-dir",
+        args.checkpoint_dir,
+        "--out-dir",
+        out_dir,
+        "--theme",
+        args.plot_theme,
+        "--allow-empty",
+    ]
     if args.pdf:
         cmd.append("--pdf")
     code, elapsed = run_cmd(cmd, dry_run=args.dry_run, allow_fail=True)
-    results["plots"] = {"status": "ok" if code == 0 else "failed",
-                        "seconds": elapsed, "out_dir": out_dir}
+    results["plots"] = {
+        "status": "ok" if code == 0 else "failed",
+        "seconds": elapsed,
+        "out_dir": out_dir,
+    }
 
 
 STAGE_FNS = {
@@ -417,11 +498,16 @@ STAGE_FNS = {
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _override_value(profile: dict, key: str, default: str) -> str:
-    for o in profile["overrides"]:
+
+def _override_value(
+    profile: dict, key: str, default: str, extra: list[str] | None = None
+) -> str:
+    """Last matching `key=value` wins: profile overrides first, then --override."""
+    value = default
+    for o in list(profile["overrides"]) + list(extra or []):
         if o.startswith(f"{key}="):
-            return o.split("=", 1)[1]
-    return default
+            value = o.split("=", 1)[1]
+    return value
 
 
 def resolve_effective_paths(args) -> None:
@@ -448,8 +534,10 @@ def resolve_effective_paths(args) -> None:
             paths = OmegaConf.to_container(group.get("paths", {}), resolve=True) or {}
             defaults.update({k: v for k, v in paths.items() if k in defaults and v})
         except Exception as e:
-            print(f"warning: could not read {compute_file} ({e}); "
-                  f"falling back to repo-relative paths")
+            print(
+                f"warning: could not read {compute_file} ({e}); "
+                f"falling back to repo-relative paths"
+            )
 
     for key, fallback in defaults.items():
         if getattr(args, key) is None:
@@ -468,10 +556,16 @@ def resolve_demo_paths(args) -> None:
     """
     scratch = os.environ.get("SCRATCH", f"/scratch/{os.environ.get('USER', '')}")
     for attr, default, fallback in (
-        ("safe_demos", "data/demos/safe.jsonl",
-         os.path.join(scratch, "trajectories", "stwebagentbench", "expert")),
-        ("unsafe_demos", "data/demos/unsafe.jsonl",
-         os.path.join(scratch, "trajectories", "stwebagentbench", "unsafe")),
+        (
+            "safe_demos",
+            "data/demos/safe.jsonl",
+            os.path.join(scratch, "trajectories", "stwebagentbench", "expert"),
+        ),
+        (
+            "unsafe_demos",
+            "data/demos/unsafe.jsonl",
+            os.path.join(scratch, "trajectories", "stwebagentbench", "unsafe"),
+        ),
     ):
         chosen = getattr(args, attr)
         if chosen is not None:
@@ -493,8 +587,16 @@ def _read_json(path: Path) -> dict:
 
 
 def _cup_fields(summary: dict) -> dict:
-    return {k: summary.get(k) for k in
-            ("cup", "completion_rate", "violation_rate", "mean_steps", "n_episodes")}
+    return {
+        k: summary.get(k)
+        for k in (
+            "cup",
+            "completion_rate",
+            "violation_rate",
+            "mean_steps",
+            "n_episodes",
+        )
+    }
 
 
 def _fmt(v) -> str:
@@ -517,18 +619,24 @@ def print_summary(results: dict, args) -> None:
         if stage == "gate":
             extra = f"  AUROC={_fmt(r.get('auroc'))} passed={r.get('passed')}"
         elif stage in ("eval_base", "eval_tuned"):
-            extra = (f"  CuP={_fmt(r.get('cup'))} "
-                     f"completion={_fmt(r.get('completion_rate'))} "
-                     f"violations={_fmt(r.get('violation_rate'))}")
-        print(f"  {stage:12s} {r['status']:12s} "
-              f"{f'{secs:6.1f}s' if secs else '':>8s}{extra}")
+            extra = (
+                f"  CuP={_fmt(r.get('cup'))} "
+                f"completion={_fmt(r.get('completion_rate'))} "
+                f"violations={_fmt(r.get('violation_rate'))}"
+            )
+        print(
+            f"  {stage:12s} {r['status']:12s} "
+            f"{f'{secs:6.1f}s' if secs else '':>8s}{extra}"
+        )
 
     base, tuned = results.get("eval_base"), results.get("eval_tuned")
     if base and tuned and base.get("cup") is not None and tuned.get("cup") is not None:
         delta = tuned["cup"] - base["cup"]
         print("-" * 72)
-        print(f"  CuP  baseline {base['cup']:.3f}  →  tuned {tuned['cup']:.3f}  "
-              f"({delta:+.3f})")
+        print(
+            f"  CuP  baseline {base['cup']:.3f}  →  tuned {tuned['cup']:.3f}  "
+            f"({delta:+.3f})"
+        )
     print("=" * 72)
 
     print(f"Report: {write_run_report(results, args)}\n")
@@ -544,12 +652,17 @@ def write_run_report(results: dict, args) -> Path:
     """
     out = Path(args.log_dir) / f"{args.run_name}_experiment.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({
-        "run_name": args.run_name,
-        "profile": args.profile,
-        "epsilon": _profile_epsilon(args),
-        "stages": results,
-    }, indent=2))
+    out.write_text(
+        json.dumps(
+            {
+                "run_name": args.run_name,
+                "profile": args.profile,
+                "epsilon": _profile_epsilon(args),
+                "stages": results,
+            },
+            indent=2,
+        )
+    )
     return out
 
 
@@ -566,48 +679,82 @@ def _profile_epsilon(args) -> float:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--profile", choices=sorted(PROFILES), default="smoke")
-    ap.add_argument("--run-name", default=None,
-                    help="default: icrl_<profile>")
-    ap.add_argument("--stages", default=",".join(STAGES),
-                    help=f"comma-separated subset of: {','.join(STAGES)}")
-    ap.add_argument("--compute", default=None,
-                    help="Hydra compute group (default: the profile's — "
-                         "local for smoke/local, carleton for cluster)")
-    ap.add_argument("--data-root", default=None,
-                    help="override paths.data_root (default: the compute group's)")
-    ap.add_argument("--checkpoint-dir", default=None,
-                    help="override paths.checkpoint_dir")
-    ap.add_argument("--log-dir", default=None,
-                    help="override paths.log_dir")
-    ap.add_argument("--embeddings-dir", default=None,
-                    help="default: embeddings/<run_name>")
-    ap.add_argument("--safe-demos", default=None,
-                    help="a .jsonl, or a directory of task_*_trace_*.json from "
-                         "the collection job (default: data/demos/safe.jsonl, "
-                         "falling back to $SCRATCH/trajectories/safe)")
-    ap.add_argument("--unsafe-demos", default=None,
-                    help="same formats (default: data/demos/unsafe.jsonl, "
-                         "falling back to $SCRATCH/trajectories/unsafe)")
-    ap.add_argument("--demo-limit", type=int, default=None,
-                    help="use only the first N demos of each label")
+    ap.add_argument("--run-name", default=None, help="default: icrl_<profile>")
+    ap.add_argument(
+        "--stages",
+        default=",".join(STAGES),
+        help=f"comma-separated subset of: {','.join(STAGES)}",
+    )
+    ap.add_argument(
+        "--compute",
+        default=None,
+        help="Hydra compute group (default: the profile's — "
+        "local for smoke/local, carleton for cluster)",
+    )
+    ap.add_argument(
+        "--data-root",
+        default=None,
+        help="override paths.data_root (default: the compute group's)",
+    )
+    ap.add_argument(
+        "--checkpoint-dir", default=None, help="override paths.checkpoint_dir"
+    )
+    ap.add_argument("--log-dir", default=None, help="override paths.log_dir")
+    ap.add_argument(
+        "--embeddings-dir", default=None, help="default: embeddings/<run_name>"
+    )
+    ap.add_argument(
+        "--safe-demos",
+        default=None,
+        help="a .jsonl, or a directory of task_*_trace_*.json from "
+        "the collection job (default: data/demos/safe.jsonl, "
+        "falling back to $SCRATCH/trajectories/safe)",
+    )
+    ap.add_argument(
+        "--unsafe-demos",
+        default=None,
+        help="same formats (default: data/demos/unsafe.jsonl, "
+        "falling back to $SCRATCH/trajectories/unsafe)",
+    )
+    ap.add_argument(
+        "--demo-limit",
+        type=int,
+        default=None,
+        help="use only the first N demos of each label",
+    )
     ap.add_argument("--encode-batch-size", type=int, default=4)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--strict-gate", action="store_true",
-                    help="stop when the held-out AUROC gate fails")
-    ap.add_argument("--plot-theme", choices=["light", "dark"], default="light",
-                    help="figure theme (default: light, for papers)")
-    ap.add_argument("--pdf", action="store_true",
-                    help="also write vector PDFs alongside the PNGs")
+    ap.add_argument(
+        "--strict-gate",
+        action="store_true",
+        help="stop when the held-out AUROC gate fails",
+    )
+    ap.add_argument(
+        "--plot-theme",
+        choices=["light", "dark"],
+        default="light",
+        help="figure theme (default: light, for papers)",
+    )
+    ap.add_argument(
+        "--pdf", action="store_true", help="also write vector PDFs alongside the PNGs"
+    )
     ap.add_argument("--wandb", action="store_true")
     ap.add_argument("--wandb-entity", default=None)
-    ap.add_argument("--override", action="append", default=[],
-                    help="extra Hydra override, repeatable")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="print the commands without running them")
+    ap.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        help="extra Hydra override, repeatable",
+    )
+    ap.add_argument(
+        "--dry-run", action="store_true", help="print the commands without running them"
+    )
     args = ap.parse_args()
 
     profile = PROFILES[args.profile]
@@ -616,7 +763,8 @@ def main() -> int:
     resolve_effective_paths(args)
     resolve_demo_paths(args)
     args.embeddings_dir = args.embeddings_dir or os.path.join(
-        args.data_root, "embeddings", args.run_name)
+        args.data_root, "embeddings", args.run_name
+    )
 
     stages = [s.strip() for s in args.stages.split(",") if s.strip()]
     args.selected_stages = stages
@@ -628,10 +776,14 @@ def main() -> int:
     print(f"Profile : {args.profile} — {profile['description']}")
     print(f"Run name: {args.run_name}")
     print(f"Compute : {args.compute}")
-    print(f"Paths   : data={args.data_root}  ckpt={args.checkpoint_dir}  "
-          f"logs={args.log_dir}")
-    print(f"Tasks   : train={profile['train_task_ids']}  "
-          f"held-out={profile['eval_task_ids']}")
+    print(
+        f"Paths   : data={args.data_root}  ckpt={args.checkpoint_dir}  "
+        f"logs={args.log_dir}"
+    )
+    print(
+        f"Tasks   : train={profile['train_task_ids']}  "
+        f"held-out={profile['eval_task_ids']}"
+    )
     print(f"Stages  : {', '.join(stages)}")
 
     results: dict = {}

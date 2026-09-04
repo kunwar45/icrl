@@ -34,6 +34,7 @@ So this is a self-contained REINFORCE-with-baseline loop:
     with LoRA the reference is the same weights with adapters disabled, so it
     costs no extra memory.
 """
+
 from __future__ import annotations
 
 import copy
@@ -65,6 +66,7 @@ logger = get_logger(__name__)
 
 
 # ── Policy construction ───────────────────────────────────────────────────────
+
 
 def load_policy(cfg: DictConfig) -> tuple:
     """Load the policy LM, optionally wrapping it in a LoRA adapter."""
@@ -115,6 +117,7 @@ def _pick_device(cfg: DictConfig) -> torch.device:
 
 # ── Trainer ───────────────────────────────────────────────────────────────────
 
+
 class LagrangianPPOTrainer:
     """
     Constrained policy-gradient trainer.
@@ -134,10 +137,14 @@ class LagrangianPPOTrainer:
         task_env: TaskEnvironment,
     ):
         if reward_model is None:
-            raise ValueError("reward_model is required — see src/lagrangian_finetuning/reward_model.py")
+            raise ValueError(
+                "reward_model is required — see src/lagrangian_finetuning/reward_model.py"
+            )
         if task_env is None:
-            raise ValueError("task_env is required — see src/lagrangian_finetuning/policy_rollout.py "
-                             "build_env_provider()")
+            raise ValueError(
+                "task_env is required — see src/lagrangian_finetuning/policy_rollout.py "
+                "build_env_provider()"
+            )
 
         self.cfg = cfg
         self.constraint_model = constraint_model
@@ -152,10 +159,18 @@ class LagrangianPPOTrainer:
         # One update per batch of episodes; gradients accumulate over every
         # (prompt, action) pair in the batch, so mini_batch_size /
         # gradient_accumulation_steps from the old TRL config do not apply.
-        self.episodes_per_step = int(OmegaConf.select(cfg, "finetune.ppo.batch_size") or 4)
-        self.max_rollout_steps = int(OmegaConf.select(cfg, "finetune.ppo.max_rollout_steps") or 30)
-        self.max_obs_tokens = int(OmegaConf.select(cfg, "finetune.ppo.max_obs_tokens") or 1024)
-        self.max_act_tokens = int(OmegaConf.select(cfg, "finetune.ppo.max_act_tokens") or 48)
+        self.episodes_per_step = int(
+            OmegaConf.select(cfg, "finetune.ppo.batch_size") or 4
+        )
+        self.max_rollout_steps = int(
+            OmegaConf.select(cfg, "finetune.ppo.max_rollout_steps") or 30
+        )
+        self.max_obs_tokens = int(
+            OmegaConf.select(cfg, "finetune.ppo.max_obs_tokens") or 1024
+        )
+        self.max_act_tokens = int(
+            OmegaConf.select(cfg, "finetune.ppo.max_act_tokens") or 48
+        )
         self.kl_coef = float(ppo.kl_penalty)
 
         self.optimizer = torch.optim.AdamW(
@@ -224,10 +239,10 @@ class LagrangianPPOTrainer:
             return torch.zeros((), device=self.device)
 
         ids = torch.cat([prompt, action]).unsqueeze(0)
-        logits = model(input_ids=ids).logits[0]           # (L, V)
+        logits = model(input_ids=ids).logits[0]  # (L, V)
         # token t is predicted by logits at t-1
         start = prompt.numel() - 1
-        action_logits = logits[start:start + action.numel()].float()
+        action_logits = logits[start : start + action.numel()].float()
         logprobs = F.log_softmax(action_logits, dim=-1)
         token_logprobs = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1)
         return token_logprobs.mean()
@@ -245,18 +260,21 @@ class LagrangianPPOTrainer:
         results = []
         for _ in range(self.episodes_per_step):
             task_id = self._rng.choice(self.task_ids)
-            results.append(rollout_episode(
-                actor=self.actor,
-                env_provider=self.env,
-                task_id=task_id,
-                reward_model=self.reward_model,
-                max_steps=self.max_rollout_steps,
-            ))
+            results.append(
+                rollout_episode(
+                    actor=self.actor,
+                    env_provider=self.env,
+                    task_id=task_id,
+                    reward_model=self.reward_model,
+                    max_steps=self.max_rollout_steps,
+                )
+            )
         return results
 
     @torch.no_grad()
     def _constraint_scores(self, trajectories: List[Trajectory]) -> List[float]:
-        texts = [t.to_text() for t in trajectories]
+        mode = getattr(self.constraint_model, "text_mode", "full")
+        texts = [t.to_text(mode) for t in trajectories]
         scores = self.constraint_model(texts)
         return [float(s) for s in scores]
 

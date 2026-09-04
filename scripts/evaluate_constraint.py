@@ -76,6 +76,7 @@ def main(cfg: DictConfig):
         tokenizer=tokenizer,
         max_length=cfg.constraint.encoder.max_length,
         head_hidden=cfg.constraint.encoder.head_hidden,
+        text_mode=cfg.constraint.encoder.get("text_mode", "full"),
     )
     # train_constraint.py gets its device from accelerator.prepare; nothing
     # here did, so the backbone scored every held-out trajectory on the CPU
@@ -87,6 +88,12 @@ def main(cfg: DictConfig):
     load_constraint_head(
         constraint_model, head_path, model_name=cfg.constraint.encoder.model_name
     )
+    wanted = cfg.constraint.encoder.get("text_mode", "full")
+    if constraint_model.text_mode != wanted:
+        print(
+            f"NOTE: head was trained on text_mode={constraint_model.text_mode!r}; "
+            f"scoring with that, not the config's {wanted!r}."
+        )
 
     evaluator = ConstraintEvaluator(constraint_model)
 

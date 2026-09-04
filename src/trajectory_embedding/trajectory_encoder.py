@@ -13,6 +13,7 @@ Factory
 Use load_qwen_encoder() to get a ready-to-use encoder with a frozen Qwen
 backbone. On SLURM this maps the model across all visible GPUs automatically.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,7 +22,12 @@ import os
 
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
+from transformers import (
+    AutoModel,
+    AutoTokenizer,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +44,7 @@ class TrajectoryEncoder(nn.Module):
         tokenizer: PreTrainedTokenizerBase,
         max_length: int = 2048,
         head_hidden: int = 256,
+        text_mode: str = "full",
     ):
         super().__init__()
         # Freeze the backbone — only the head will be trained
@@ -50,6 +57,11 @@ class TrajectoryEncoder(nn.Module):
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
         self.max_length = max_length
+        # How a Trajectory is serialised before it reaches the backbone
+        # (Trajectory.to_text mode). Recorded in the head checkpoint's metadata
+        # and restored on load, so a head trained on actions-only text is never
+        # asked to score full transcripts.
+        self.text_mode = text_mode
 
         hidden_size = model.config.hidden_size
         self.head = nn.Sequential(
@@ -79,11 +91,11 @@ class TrajectoryEncoder(nn.Module):
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
         outputs = self.backbone(**inputs)
-        last_hidden = outputs.last_hidden_state          # (B, L, H)
+        last_hidden = outputs.last_hidden_state  # (B, L, H)
 
         mask = inputs["attention_mask"].unsqueeze(-1).float()
         pooled = (last_hidden * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
-        return pooled.float()                            # (B, H)
+        return pooled.float()  # (B, H)
 
     @torch.no_grad()
     def embed_texts(self, texts: list[str], batch_size: int = 8) -> torch.Tensor:
@@ -114,25 +126,33 @@ class TrajectoryEncoder(nn.Module):
 
 # ── Head checkpoint I/O ───────────────────────────────────────────────────────
 
+
 def _meta_path(head_path: str) -> str:
     return os.path.splitext(head_path)[0] + ".meta.json"
 
 
-def save_constraint_head(encoder: TrajectoryEncoder, head_path: str,
-                         model_name: str, max_length: int) -> None:
+def save_constraint_head(
+    encoder: TrajectoryEncoder, head_path: str, model_name: str, max_length: int
+) -> None:
     """Save the trained head plus the encoder identity it was trained against."""
     os.makedirs(os.path.dirname(head_path) or ".", exist_ok=True)
     torch.save(encoder.head.state_dict(), head_path)
     with open(_meta_path(head_path), "w") as f:
-        json.dump({
-            "encoder_model": model_name,
-            "hidden_size": encoder.hidden_size,
-            "max_length": max_length,
-        }, f, indent=2)
+        json.dump(
+            {
+                "encoder_model": model_name,
+                "hidden_size": encoder.hidden_size,
+                "max_length": max_length,
+                "text_mode": getattr(encoder, "text_mode", "full"),
+            },
+            f,
+            indent=2,
+        )
 
 
-def load_constraint_head(encoder: TrajectoryEncoder, head_path: str,
-                         model_name: str = "") -> None:
+def load_constraint_head(
+    encoder: TrajectoryEncoder, head_path: str, model_name: str = ""
+) -> None:
     """
     Load a trained head into `encoder`, in place.
 
@@ -171,9 +191,13 @@ def load_constraint_head(encoder: TrajectoryEncoder, head_path: str,
         ) from e
 
     encoder.head.to(next(encoder.backbone.parameters()).device)
+    # The head was trained on text serialised one way; score the same way.
+    # Heads saved before text_mode existed were all trained on full text.
+    encoder.text_mode = meta.get("text_mode", "full")
 
 
 # ── Factory ───────────────────────────────────────────────────────────────────
+
 
 def load_qwen_encoder(
     model_name: str = DEFAULT_ENCODER_MODEL,
@@ -208,7 +232,9 @@ def load_qwen_encoder(
     if device is None:
         if torch.cuda.is_available():
             n_gpus = torch.cuda.device_count()
-            device_map: str | torch.device = "auto" if n_gpus > 1 else torch.device("cuda:0")
+            device_map: str | torch.device = (
+                "auto" if n_gpus > 1 else torch.device("cuda:0")
+            )
         elif torch.backends.mps.is_available():
             device_map = torch.device("mps")
         else:
@@ -241,8 +267,11 @@ def load_qwen_encoder(
         backbone = backbone.to(device_map)
 
     n_params = sum(p.numel() for p in backbone.parameters()) / 1e6
-    logger.info("Backbone loaded: %.0fM params  hidden_size=%d",
-                n_params, backbone.config.hidden_size)
+    logger.info(
+        "Backbone loaded: %.0fM params  hidden_size=%d",
+        n_params,
+        backbone.config.hidden_size,
+    )
 
     encoder = TrajectoryEncoder(
         model=backbone,
@@ -256,6 +285,9 @@ def load_qwen_encoder(
     encoder.head = encoder.head.to(backbone_device)
 
     head_params = sum(p.numel() for p in encoder.head.parameters())
-    logger.info("TrajectoryEncoder ready  head_params=%d  max_length=%d",
-                head_params, max_length)
+    logger.info(
+        "TrajectoryEncoder ready  head_params=%d  max_length=%d",
+        head_params,
+        max_length,
+    )
     return encoder

@@ -29,7 +29,8 @@ class ConstraintEvaluator:
         # max_length tokens is what turned the 2026-09-04 ODCV gate into a
         # 40-minute CPU job. embed_texts already batches the frozen backbone.
         self.model.eval()
-        texts = [t.to_text() for t in trajectories]
+        mode = getattr(self.model, "text_mode", "full")
+        texts = [t.to_text(mode) for t in trajectories]
         pooled = self.model.embed_texts(texts, batch_size=batch_size)
         scores = self.model.head(pooled).squeeze(-1)
         return scores.detach().cpu().numpy()

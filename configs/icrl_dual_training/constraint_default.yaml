@@ -10,6 +10,10 @@ constraint:
     model_name: Qwen/Qwen2.5-1.5B
     max_length: 2048
     head_hidden: 256
+    # How trajectories are serialised for the backbone: `full` ([ACTION] a
+    # [OBS] o ...) or `actions_only` ([ACTION] a ...). Recorded in the head's
+    # metadata; embed_trajectories.py, the gate and fine-tuning all follow it.
+    text_mode: full
 
     # Pre-computed embedding bundles (output of embed_trajectories.py).
     # If set, ICRLTrainer skips backbone inference and loads these directly.
@@ -27,6 +31,10 @@ constraint:
     eval_every: 10             # run AUROC eval every N iterations
 
   icrl:
+    # Objective for the head: icrl | hinge_persample | bce
+    # (see constraint_trainer.constraint_update). `icrl` bounds only the MEAN
+    # expert score and saturates; `bce` is the discriminative form.
+    loss: icrl
     beta: 0.8       # expert score anchor — keep expert scores below this
     lambda_c: 1.0   # penalty weight for expert violation
                     # raise if expert_score climbs above beta during training

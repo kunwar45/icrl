@@ -19,6 +19,7 @@ Three numbers to watch every iteration:
   expert_constraint_score  — should stay below β; if it climbs, raise lambda_c
   task_reward              — mean reward of policy trajectories in the pool
 """
+
 from __future__ import annotations
 
 import random
@@ -38,6 +39,7 @@ logger = get_logger(__name__)
 
 # ── Core update function ──────────────────────────────────────────────────────
 
+
 def constraint_update(
     ctheta: TrajectoryEncoder,
     policy_embeddings: torch.Tensor,
@@ -48,9 +50,21 @@ def constraint_update(
     lr: float,
     weight_decay: float,
     batch_size: int,
+    loss_kind: str = "icrl",
 ) -> dict:
     """
     Phase 2: M gradient steps on the constraint function head.
+
+    loss_kind selects the objective (all keep the convention high = unsafe):
+
+      icrl              -mean(p) + λ·relu(mean(e) - β)   the ICRL constraint form.
+                        Bounds only the MEAN expert score, so half the experts
+                        can sit at 1.0 while the mean stays under β — measured
+                        2026-09-04 on ODCV: held-out expert median 0.997.
+      hinge_persample   -mean(p) + λ·mean(relu(e - β))   the same, per trajectory.
+      bce               binary cross-entropy, experts 0 / policy 1. Best held-out
+                        ranking and calibration on ODCV (within-scenario AUROC
+                        0.81 vs 0.71 for the icrl form over 12 scenario folds).
 
     Accepts pre-computed embeddings (frozen backbone output).  Since the
     backbone never changes, calling embed_texts() once before this function
@@ -87,7 +101,22 @@ def constraint_update(
         e_scores = ctheta.head(expert_embeddings[e_idx]).squeeze(-1)
 
         # Push policy scores HIGH (unsafe); keep expert scores BELOW β (safe)
-        loss = -p_scores.mean() + lambda_c * F.relu(e_scores.mean() - beta)
+        if loss_kind == "icrl":
+            loss = -p_scores.mean() + lambda_c * F.relu(e_scores.mean() - beta)
+        elif loss_kind == "hinge_persample":
+            loss = -p_scores.mean() + lambda_c * F.relu(e_scores - beta).mean()
+        elif loss_kind == "bce":
+            # The head ends in a Sigmoid, so these are probabilities already.
+            eps = 1e-6
+            loss = F.binary_cross_entropy(
+                e_scores.clamp(eps, 1 - eps), torch.zeros_like(e_scores)
+            ) + F.binary_cross_entropy(
+                p_scores.clamp(eps, 1 - eps), torch.ones_like(p_scores)
+            )
+        else:
+            raise ValueError(
+                f"unknown loss_kind {loss_kind!r}: use icrl, hinge_persample or bce"
+            )
 
         optimizer.zero_grad()
         loss.backward()
@@ -95,17 +124,18 @@ def constraint_update(
 
         p_scores_last = p_scores.mean().item()
         e_scores_last = e_scores.mean().item()
-        loss_last     = loss.item()
+        loss_last = loss.item()
 
     ctheta.eval()
     return {
         "policy_constraint_score": p_scores_last,
         "expert_constraint_score": e_scores_last,
-        "constraint_loss":         loss_last,
+        "constraint_loss": loss_last,
     }
 
 
 # ── Outer training loop ───────────────────────────────────────────────────────
+
 
 class ICRLTrainer:
     """
@@ -141,28 +171,32 @@ class ICRLTrainer:
         run_name: str = "icrl",
         expert_embeddings: Optional[torch.Tensor] = None,
         policy_embeddings: Optional[torch.Tensor] = None,
+        loss_kind: str = "icrl",
     ):
         if policy_trajs is None and rollout_fn is None:
-            raise ValueError("Provide either policy_trajs (offline) or rollout_fn (online).")
+            raise ValueError(
+                "Provide either policy_trajs (offline) or rollout_fn (online)."
+            )
 
-        self.ctheta             = ctheta
-        self.expert_trajs       = expert_trajs
-        self.policy_pool        = list(policy_trajs or [])
-        self.rollout_fn         = rollout_fn
-        self.beta               = beta
-        self.lambda_c           = lambda_c
+        self.loss_kind = loss_kind
+        self.ctheta = ctheta
+        self.expert_trajs = expert_trajs
+        self.policy_pool = list(policy_trajs or [])
+        self.rollout_fn = rollout_fn
+        self.beta = beta
+        self.lambda_c = lambda_c
         self.n_constraint_steps = n_constraint_steps
-        self.batch_size         = batch_size
-        self.lr                 = lr
-        self.weight_decay       = weight_decay
-        self.rollouts_per_iter  = rollouts_per_iter
+        self.batch_size = batch_size
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.rollouts_per_iter = rollouts_per_iter
         self.policy_buffer_size = policy_buffer_size
-        self.eval_every         = eval_every
-        self.evaluator          = ConstraintEvaluator(ctheta)
+        self.eval_every = eval_every
+        self.evaluator = ConstraintEvaluator(ctheta)
         # Suffixed so the constraint and fine-tuning stages do not append to one
         # file: their step counters both start at 1, and interleaved rows make
         # every time series unplottable.
-        self.metrics_logger     = MetricsLogger(log_dir, f"{run_name}_constraint")
+        self.metrics_logger = MetricsLogger(log_dir, f"{run_name}_constraint")
 
         # Pre-computed backbone outputs (scripts/embed_trajectories.py). When
         # supplied, train() skips backbone inference entirely — the backbone is
@@ -170,15 +204,17 @@ class ICRLTrainer:
         self.expert_embeddings = self._to_head_device(expert_embeddings)
         self.policy_embeddings = self._to_head_device(policy_embeddings)
 
-        if self.expert_embeddings is not None and \
-                self.expert_embeddings.size(0) != len(expert_trajs):
+        if self.expert_embeddings is not None and self.expert_embeddings.size(0) != len(
+            expert_trajs
+        ):
             raise ValueError(
                 f"expert_embeddings has {self.expert_embeddings.size(0)} rows but "
                 f"{len(expert_trajs)} expert trajectories were passed — the cached "
                 f"bundle was built from a different demo file."
             )
-        if self.policy_embeddings is not None and \
-                self.policy_embeddings.size(0) != len(self.policy_pool):
+        if self.policy_embeddings is not None and self.policy_embeddings.size(0) != len(
+            self.policy_pool
+        ):
             raise ValueError(
                 f"policy_embeddings has {self.policy_embeddings.size(0)} rows but "
                 f"{len(self.policy_pool)} policy trajectories were passed — the cached "
@@ -206,10 +242,12 @@ class ICRLTrainer:
             expert_embs = self.expert_embeddings
             logger.info(f"Using cached expert embeddings: {tuple(expert_embs.shape)}")
         else:
-            logger.info(f"Pre-computing expert embeddings ({len(self.expert_trajs)} demos)...")
-            expert_embs = self._to_head_device(self.ctheta.embed_texts(
-                [t.to_text() for t in self.expert_trajs]
-            ))
+            logger.info(
+                f"Pre-computing expert embeddings ({len(self.expert_trajs)} demos)..."
+            )
+            expert_embs = self._to_head_device(
+                self.ctheta.embed_texts([t.to_text() for t in self.expert_trajs])
+            )
             logger.info(f"Expert embeddings ready: {tuple(expert_embs.shape)}")
 
         # ── Offline policy embeddings ─────────────────────────────────────────
@@ -218,28 +256,33 @@ class ICRLTrainer:
             policy_embs = self.policy_embeddings
             logger.info(f"Using cached policy embeddings: {tuple(policy_embs.shape)}")
         elif self.policy_pool:
-            logger.info(f"Pre-computing policy embeddings ({len(self.policy_pool)} demos)...")
-            policy_embs = self._to_head_device(self.ctheta.embed_texts(
-                [t.to_text() for t in self.policy_pool]
-            ))
+            logger.info(
+                f"Pre-computing policy embeddings ({len(self.policy_pool)} demos)..."
+            )
+            policy_embs = self._to_head_device(
+                self.ctheta.embed_texts([t.to_text() for t in self.policy_pool])
+            )
             logger.info(f"Policy embeddings ready: {tuple(policy_embs.shape)}")
 
         for iteration in range(1, n_iterations + 1):
             # ── Phase 1: collect fresh rollouts (online mode only) ────────────
             if self.rollout_fn is not None:
                 new_trajs = self.rollout_fn(self.rollouts_per_iter)
-                new_embs  = self._to_head_device(
+                new_embs = self._to_head_device(
                     self.ctheta.embed_texts([t.to_text() for t in new_trajs])
                 )
                 self.policy_pool.extend(new_trajs)
 
-                policy_embs = new_embs if policy_embs is None else \
-                              torch.cat([policy_embs, new_embs], dim=0)
+                policy_embs = (
+                    new_embs
+                    if policy_embs is None
+                    else torch.cat([policy_embs, new_embs], dim=0)
+                )
 
                 # Cap buffer — drop oldest embeddings and trajectories together
                 if len(self.policy_pool) > self.policy_buffer_size:
-                    self.policy_pool = self.policy_pool[-self.policy_buffer_size:]
-                    policy_embs      = policy_embs[-self.policy_buffer_size:]
+                    self.policy_pool = self.policy_pool[-self.policy_buffer_size :]
+                    policy_embs = policy_embs[-self.policy_buffer_size :]
 
             if policy_embs is None or policy_embs.size(0) == 0:
                 logger.warning(f"[{iteration}] No policy trajectories — skipping.")
@@ -256,12 +299,13 @@ class ICRLTrainer:
                 lr=self.lr,
                 weight_decay=self.weight_decay,
                 batch_size=self.batch_size,
+                loss_kind=self.loss_kind,
             )
 
             # ── Logging ───────────────────────────────────────────────────────
             rewards = [t.reward for t in self.policy_pool if t.reward is not None]
-            metrics["task_reward"]       = sum(rewards) / len(rewards) if rewards else 0.0
-            metrics["policy_pool_size"]  = len(self.policy_pool)
+            metrics["task_reward"] = sum(rewards) / len(rewards) if rewards else 0.0
+            metrics["policy_pool_size"] = len(self.policy_pool)
 
             logger.info(
                 f"[{iteration:4d}/{n_iterations}]  "
@@ -284,7 +328,8 @@ class ICRLTrainer:
                     f"unsafe={eval_m['unsafe_mean_score']:.3f}  "
                     f"safe={eval_m['safe_mean_score']:.3f}"
                 )
-                self.metrics_logger.log({f"eval_{k}": v for k, v in eval_m.items()},
-                                         step=iteration)
+                self.metrics_logger.log(
+                    {f"eval_{k}": v for k, v in eval_m.items()}, step=iteration
+                )
 
         return self.ctheta
