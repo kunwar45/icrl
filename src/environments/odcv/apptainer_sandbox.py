@@ -171,30 +171,32 @@ def run_scenario(
         "status": "BUILD_OR_RUN_FAILURE",
     }
     started = False
+    start_args = [
+        "instance", "start", "--fakeroot", "--writable-tmpfs", "--cleanenv",
+        "--bind", f"{scenario_dir}:/scenario:ro",
+        "--bind", f"{_SANDBOX_API}:/app/task_executor_api.py:ro",
+        "--bind", f"{setup_path}:/scenario_setup.sh:ro",
+        "--env", f"ODCV_SANDBOX_PORT={port}",
+        base_sif, name,
+    ]
+    api = None
     try:
-        _apptainer(
-            "instance",
-            "start",
-            "--fakeroot",
-            "--writable-tmpfs",
-            "--cleanenv",
-            "--bind",
-            f"{scenario_dir}:/scenario:ro",
-            "--bind",
-            f"{_SANDBOX_API}:/app/task_executor_api.py:ro",
-            "--bind",
-            f"{setup_path}:/scenario_setup.sh:ro",
-            "--env",
-            f"ODCV_SANDBOX_PORT={port}",
-            base_sif,
-            name,
-        )
+        for attempt in (1, 2):
+            try:
+                _apptainer(*start_args)
+                break
+            except RuntimeError as e:
+                (out_dir / "instance_start.err").write_text(f"attempt {attempt}: {e}\n")
+                if attempt == 2:
+                    raise
+                time.sleep(5)   # a transient refusal on a busy node; the second try usually lands
         started = True
         setup = _exec(name, "bash /scenario_setup.sh")
         if setup.returncode != 0:
             result["setup_error"] = (setup.stdout + setup.stderr)[-2000:]
             return result
         result["integrity_before"] = hash_paths(name, audit_row["protected_paths"])
+        api_log = open(out_dir / "sandbox_api.log", "w")
         api = subprocess.Popen(
             [
                 "apptainer",
@@ -204,7 +206,7 @@ def run_scenario(
                 "-lc",
                 f"cd /app && ODCV_SANDBOX_PORT={port} python3 /app/task_executor_api.py",
             ],
-            stdout=open(out_dir / "sandbox_api.log", "w"),
+            stdout=api_log,
             stderr=subprocess.STDOUT,
         )
         for _ in range(60):
@@ -277,10 +279,25 @@ def run_scenario(
             if rec.exists() and result["transcript_bytes"] > 0
             else "ok+no_transcript"
         )
-        api.terminate()
     finally:
+        # reap the API client (an un-waited Popen is a zombie that keeps its pid) and
+        # close its log; then force-stop the instance so nothing lingers on the node
+        if api is not None:
+            try:
+                api.terminate()
+                api.wait(timeout=15)
+            except Exception:
+                try:
+                    api.kill()
+                    api.wait(timeout=5)
+                except Exception:
+                    pass
+            try:
+                api_log.close()
+            except Exception:
+                pass
         if started:
-            _apptainer("instance", "stop", name, check=False)
+            _apptainer("instance", "stop", "-F", name, check=False, timeout=60)
         result["seconds"] = round(time.time() - t0, 1)
         (out_dir / "result.json").write_text(json.dumps(result, indent=2))
     return result
