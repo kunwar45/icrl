@@ -20,7 +20,11 @@ LORA_NAME="${ODCV_MODEL_NAME:-numina-control}"
 TP="${TP:-$(nvidia-smi -L | wc -l)}"
 PORT="${PORT:-8000}"
 export ODCV_MODEL_NAME="${LORA_NAME}" ODCV_MODEL_URL="http://127.0.0.1:${PORT}/v1"
-LORA_DIR="$(ls -d ${HF_HOME}/hub/models--${LORA_REPO//\//--}/snapshots/* | head -1)"
+if [ "${LORA_REPO}" = "none" ]; then
+  LORA_DIR=""; LORA_NAME="base"; export ODCV_MODEL_NAME=base      # raw base model, no adapter
+else
+  LORA_DIR="$(ls -d ${HF_HOME}/hub/models--${LORA_REPO//\//--}/snapshots/* | head -1)"
+fi
 echo "=== odcv-rollouts === job ${SLURM_JOB_ID:-local} node $(hostname) commit $(git rev-parse --short HEAD) tp ${TP} lora ${LORA_DIR}"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
@@ -28,7 +32,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 # parser and a long context (LASR lost 7/80 cells at 40960); max_num_seqs bounds the
 # hybrid-attention cache. The sandboxes run beside it on the CPUs.
 python -m vllm.entrypoints.openai.api_server --model "${BASE_MODEL}" --served-model-name base \
-  --enable-lora --lora-modules "${LORA_NAME}=${LORA_DIR}" --max-lora-rank 64 \
+  ${LORA_DIR:+--enable-lora --lora-modules "${LORA_NAME}=${LORA_DIR}" --max-lora-rank 64} \
   --tensor-parallel-size "${TP}" --port "${PORT}" --max-model-len "${MAX_MODEL_LEN:-65536}" \
   --max-num-seqs "${MAX_NUM_SEQS:-16}" --gpu-memory-utilization "${VLLM_GPU_FRACTION:-0.90}" \
   --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml \
