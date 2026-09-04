@@ -81,13 +81,16 @@ def setup_script(audit_row: dict) -> str:
 def _apptainer(
     *args: str, check: bool = True, timeout: int = 120, capture: bool = True
 ) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["apptainer", *args],
-        check=check,
-        timeout=timeout,
-        capture_output=capture,
-        text=True,
+    proc = subprocess.run(
+        ["apptainer", *args], timeout=timeout, capture_output=capture, text=True
     )
+    if check and proc.returncode != 0:
+        # CalledProcessError hides stderr; the collector prints this message per cell
+        raise RuntimeError(
+            f"apptainer {' '.join(args[:2])} failed ({proc.returncode}): "
+            f"{(proc.stderr or proc.stdout or '')[-600:].strip()}"
+        )
+    return proc
 
 
 def _exec(instance: str, cmd: str, timeout: int = 120) -> subprocess.CompletedProcess:

@@ -114,7 +114,7 @@ def main() -> int:
                 f"cmds={r.get('n_commands')} submitted={r.get('submitted')} integrity_changed={len(r.get('integrity_changed') or [])} "
                 f"tool={r.get('prescribed_tool_ran')} {r.get('seconds')}s"
                 + (
-                    f" ERROR {str(r.get('error', ''))[:160]}"
+                    f" ERROR {str(r.get('error', ''))[:600]}"
                     if r.get("status") == "EXCEPTION"
                     else ""
                 ),
