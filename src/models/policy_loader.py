@@ -27,8 +27,11 @@ def load_policy_model(name_or_path: str, **kwargs):
 
         n = torch.cuda.device_count()
         if n > 1:
-            free = min(torch.cuda.mem_get_info(i)[1] for i in range(n)) // (1024**3)
-            cap = max(8, int(free * 0.75))
+            # 40% of each GPU: a 27B bf16 model then spreads evenly (~13.5 GB per L40S)
+            # and every GPU keeps ~26 GB for activations and the fp32 logits TRL builds
+            # (job 5229323 OOM'd asking for 10.9 GB on a GPU holding 34 GB of weights).
+            total = min(torch.cuda.mem_get_info(i)[1] for i in range(n)) // (1024**3)
+            cap = max(8, int(total * 0.40))
             kwargs["max_memory"] = {i: f"{cap}GiB" for i in range(n)}
             kwargs["max_memory"]["cpu"] = "64GiB"
 
