@@ -257,6 +257,16 @@ def sft(
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from trl import SFTConfig, SFTTrainer
 
+    # TRL logs the mean entropy of the policy logits every step. On this model the
+    # [2, L, 248320] fp32 logits (vocab 248k) make that reshape die with "unspecified
+    # launch failure" once gradients are attached (jobs 5229579, 5230779), while the
+    # loss itself is fine. Entropy is a log line; skip it.
+    import trl.trainer.sft_trainer as _trl_mod
+
+    _trl_mod.entropy_from_logits = lambda logits, chunk_size=128: torch.zeros(
+        logits.shape[:-1], device=logits.device, dtype=torch.float32
+    )
+
     tok = AutoTokenizer.from_pretrained(str(merged))
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
