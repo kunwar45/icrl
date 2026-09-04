@@ -64,6 +64,35 @@ def save_state(out: Path, state: dict) -> None:
     (out / "state.json").write_text(json.dumps(state, indent=2))
 
 
+def save_processor_files(base_model: str, merged: Path) -> None:
+    """vLLM loads Qwen3.6 as a conditional-generation model and wants its image/video
+    processor configs beside the weights; save_pretrained on the model writes none of
+    them (round 0 of job 5229271 died on exactly that). Save the processor, and copy
+    every non-weight file of the source snapshot as a belt-and-braces fallback."""
+    try:
+        from transformers import AutoProcessor
+
+        AutoProcessor.from_pretrained(base_model).save_pretrained(str(merged))
+    except Exception as e:
+        print(
+            f"AutoProcessor save failed ({str(e)[:120]}); copying snapshot files instead"
+        )
+    try:
+        from huggingface_hub import snapshot_download
+
+        snap = Path(snapshot_download(base_model, local_files_only=True))
+        for f in snap.iterdir():
+            if (
+                f.is_file()
+                and not f.name.endswith(".safetensors")
+                and f.name != "model.safetensors.index.json"
+                and not (merged / f.name).exists()
+            ):
+                shutil.copy(f, merged / f.name)
+    except Exception as e:
+        print(f"snapshot copy skipped ({str(e)[:120]})")
+
+
 def merge_organism(cfg) -> Path:
     merged = Path(cfg.policy.merged_dir)
     if (merged / "config.json").exists():
@@ -83,6 +112,7 @@ def merge_organism(cfg) -> Path:
     merged.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(str(merged), safe_serialization=True, max_shard_size="5GB")
     AutoTokenizer.from_pretrained(cfg.policy.base_model).save_pretrained(str(merged))
+    save_processor_files(cfg.policy.base_model, merged)
     print(
         f"merged and saved organism to {merged} in {time.time() - t0:.0f}s", flush=True
     )
@@ -242,9 +272,7 @@ def sft(
         f"SFT examples: {len(examples)} of {len(kept)} kept rollouts fit in {cfg.train.max_length} tokens",
         flush=True,
     )
-    model = load_policy_model(
-        str(merged), dtype=torch.bfloat16, device_map="auto"
-    )
+    model = load_policy_model(str(merged), dtype=torch.bfloat16, device_map="auto")
     model.config.use_cache = False
     if prev_adapter is not None:
         model = PeftModel.from_pretrained(model, str(prev_adapter), is_trainable=True)
@@ -254,7 +282,9 @@ def sft(
             r=int(cfg.policy.lora.r),
             lora_alpha=int(cfg.policy.lora.alpha),
             lora_dropout=float(cfg.policy.lora.dropout),
-            target_modules=lora_target_regex(model, list(cfg.policy.lora.target_modules)),
+            target_modules=lora_target_regex(
+                model, list(cfg.policy.lora.target_modules)
+            ),
             task_type="CAUSAL_LM",
         )
     kwargs = dict(
