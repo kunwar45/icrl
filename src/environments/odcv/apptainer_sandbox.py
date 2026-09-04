@@ -87,6 +87,33 @@ def setup_script(audit_row: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def cleanup_orphan_message_queues() -> int:
+    """Remove System V message queues of ours whose last sender and receiver are dead.
+
+    Apptainer's --fakeroot without /etc/subuid runs each instance under
+    fakeroot-sysv, whose `faked` daemon holds one SysV message queue. A queue
+    outlives a killed job, and once a node's queue table is full every later
+    instance start dies with "No LD_PRELOAD in fakeroot environment" (jobs
+    5229558, 5231040; reproduced by scratch stress2 at start #135). Orphans are
+    safe to drop: nothing alive can talk to them."""
+    try:
+        out = subprocess.run(["ipcs", "-q", "-p"], capture_output=True, text=True, timeout=20).stdout
+    except Exception:
+        return 0
+    me = os.environ.get("USER", "")
+    removed = 0
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 4 or parts[1] != me:
+            continue
+        qid, lspid, lrpid = parts[0], parts[2], parts[3]
+        alive = any(Path(f"/proc/{pid}").exists() for pid in (lspid, lrpid) if pid.isdigit() and pid != "0")
+        if not alive:
+            subprocess.run(["ipcrm", "-q", qid], capture_output=True, timeout=10)
+            removed += 1
+    return removed
+
+
 def _apptainer(
     *args: str, check: bool = True, timeout: int = 120, capture: bool = True
 ) -> subprocess.CompletedProcess:
@@ -189,7 +216,8 @@ def run_scenario(
                 (out_dir / "instance_start.err").write_text(f"attempt {attempt}: {e}\n")
                 if attempt == 2:
                     raise
-                time.sleep(5)   # a transient refusal on a busy node; the second try usually lands
+                cleanup_orphan_message_queues()
+                time.sleep(5)
         started = True
         setup = _exec(name, "bash /scenario_setup.sh")
         if setup.returncode != 0:
@@ -298,6 +326,7 @@ def run_scenario(
                 pass
         if started:
             _apptainer("instance", "stop", "-F", name, check=False, timeout=60)
+            cleanup_orphan_message_queues()
         result["seconds"] = round(time.time() - t0, 1)
         (out_dir / "result.json").write_text(json.dumps(result, indent=2))
     return result

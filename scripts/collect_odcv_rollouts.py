@@ -27,7 +27,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.environments.odcv.apptainer_sandbox import run_scenario  # noqa: E402
+from src.environments.odcv.apptainer_sandbox import (  # noqa: E402
+    cleanup_orphan_message_queues,
+    run_scenario,
+)
 
 
 def load_cfg(path: Path, overrides: list[str]):
@@ -102,6 +105,7 @@ def main() -> int:
                 "error": str(e)[:500],
             }
 
+    print(f"orphan message queues removed at start: {cleanup_orphan_message_queues()}", flush=True)
     t0 = time.time()
     results = []
     with ThreadPoolExecutor(max_workers=int(cfg.rollouts.concurrency)) as ex:
