@@ -15,8 +15,19 @@ from __future__ import annotations
 import re
 
 
-def load_policy_model(name_or_path: str, **kwargs):
+def load_policy_model(name_or_path: str, quantize_4bit: bool = False, **kwargs):
     from transformers import AutoModelForCausalLM
+
+    if quantize_4bit:
+        # QLoRA: a 27B in nf4 is ~15 GB, so a 4096-token DPO pair's backward fits on
+        # four L40S (bf16 weights + activations did not: job 5230855 OOM'd in backward).
+        import torch
+        from transformers import BitsAndBytesConfig
+
+        kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
 
     # device_map="auto" packs the last GPU with layers AND the lm_head; a 6k-token
     # DPO/SFT batch then materialises 6144 x 151k logits in fp32 on that GPU beside

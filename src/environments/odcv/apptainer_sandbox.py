@@ -89,7 +89,8 @@ def _apptainer(
         # CalledProcessError hides stderr; the collector prints this message per cell
         raise RuntimeError(
             f"apptainer {' '.join(args[:2])} failed ({proc.returncode}): "
-            f"{(proc.stderr or proc.stdout or '')[-600:].strip()}"
+            f"{((proc.stderr or '') + ' || ' + (proc.stdout or ''))[:400].strip()} ... "
+            f"{((proc.stderr or '') + ' || ' + (proc.stdout or ''))[-400:].strip()}"
         )
     return proc
 

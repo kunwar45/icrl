@@ -90,9 +90,17 @@ def main() -> int:
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     t0 = time.time()
-    model = load_policy_model(
-        cfg.policy.base_model, dtype=torch.bfloat16, device_map="auto"
-    )
+    merged_dir = Path(str(cfg.policy.get("merged_dir", "")))
+    quant = bool(cfg.policy.get("quantize_4bit", False))
+    if merged_dir.is_dir() and (merged_dir / "config.json").exists():
+        # the organism already merged (by the Lagrangian loop's round 0): no in-process merge
+        model = load_policy_model(str(merged_dir), quantize_4bit=quant, dtype=torch.bfloat16, device_map="auto")
+        cfg.policy.start_adapter = None
+        print(f"loaded merged organism from {merged_dir} (4-bit={quant})")
+    else:
+        model = load_policy_model(
+            cfg.policy.base_model, quantize_4bit=quant, dtype=torch.bfloat16, device_map="auto"
+        )
     print(
         f"base loaded in {time.time() - t0:.0f}s; device map over {torch.cuda.device_count()} GPUs"
     )
@@ -104,6 +112,11 @@ def main() -> int:
         print(f"merged start adapter {cfg.policy.start_adapter}")
     model.config.use_cache = False
 
+    if quant:
+        from peft import prepare_model_for_kbit_training
+
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True,
+                                                gradient_checkpointing_kwargs={"use_reentrant": False})
     lora = LoraConfig(
         r=int(cfg.policy.lora.r),
         lora_alpha=int(cfg.policy.lora.alpha),

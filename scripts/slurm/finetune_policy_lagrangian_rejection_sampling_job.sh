@@ -17,6 +17,14 @@ ICRL_REPO="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "${ICRL_REPO}"
 source scripts/slurm/job_environment.sh
 module load apptainer/1.4.5 2>/dev/null || module load apptainer 2>/dev/null || true
+# Apptainer unpacks/mounts per instance under its tmpdir; on /tmp of a shared node that
+# filled up after ~110 starts and every later start failed (jobs 5229558, 5229564). Use
+# the job's node-local scratch, which SLURM wipes, and drop any instance a previous job
+# left behind on this node.
+export APPTAINER_TMPDIR="${SLURM_TMPDIR:-/tmp}/apptainer_tmp" APPTAINER_CACHEDIR="${SCRATCH}/apptainer_cache"
+mkdir -p "${APPTAINER_TMPDIR}" "${APPTAINER_CACHEDIR}"
+apptainer instance stop --all >/dev/null 2>&1 || true
+df -h "${SLURM_TMPDIR:-/tmp}" | tail -1
 export HF_HUB_OFFLINE=1
 CONFIG="${CONFIG:-configs/lagrangian_finetuning/odcv_lagrangian_rejection_sampling.yaml}"
 echo "=== odcv-lagrangian-rs === job ${SLURM_JOB_ID:-local} node $(hostname) config ${CONFIG} commit $(git rev-parse --short HEAD)"

@@ -12,6 +12,9 @@ policy:
   # advice" control: 9,284 Table-2 rows + 716 NuminaMath rows). Merged into the
   # base before training so the reference model is the organism itself.
   start_adapter: matboz/qwen3.6-27b-lora-9284-numina-control-716-r64
+  merged_dir: ${oc.env:SCRATCH}/icrl/models/qwen3.6-27b-numina-control-merged
+  # QLoRA: load the policy in nf4 so a full-length DPO/SFT batch fits beside it on four L40S
+  quantize_4bit: true
   lora:
     r: 64
     alpha: 128

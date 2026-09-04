@@ -49,6 +49,14 @@ done
 curl -s "http://127.0.0.1:${PORT}/v1/models" | python -c "import json,sys; print('served:', [m['id'] for m in json.load(sys.stdin)['data']])"
 
 module load apptainer/1.4.5 2>/dev/null || module load apptainer 2>/dev/null || true
+# Apptainer unpacks/mounts per instance under its tmpdir; on /tmp of a shared node that
+# filled up after ~110 starts and every later start failed (jobs 5229558, 5229564). Use
+# the job's node-local scratch, which SLURM wipes, and drop any instance a previous job
+# left behind on this node.
+export APPTAINER_TMPDIR="${SLURM_TMPDIR:-/tmp}/apptainer_tmp" APPTAINER_CACHEDIR="${SCRATCH}/apptainer_cache"
+mkdir -p "${APPTAINER_TMPDIR}" "${APPTAINER_CACHEDIR}"
+apptainer instance stop --all >/dev/null 2>&1 || true
+df -h "${SLURM_TMPDIR:-/tmp}" | tail -1
 apptainer --version
 EXTRA_ARGS=()
 if [ "${SMOKE:-0}" = "1" ]; then

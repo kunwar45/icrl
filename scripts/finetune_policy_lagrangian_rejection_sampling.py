@@ -282,8 +282,14 @@ def sft(
         f"SFT examples: {len(examples)} of {len(kept)} kept rollouts fit in {cfg.train.max_length} tokens",
         flush=True,
     )
-    model = load_policy_model(str(merged), dtype=torch.bfloat16, device_map="auto")
+    quant = bool(cfg.policy.get("quantize_4bit", False))
+    model = load_policy_model(str(merged), quantize_4bit=quant, dtype=torch.bfloat16, device_map="auto")
     model.config.use_cache = False
+    if quant:
+        from peft import prepare_model_for_kbit_training
+
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True,
+                                                gradient_checkpointing_kwargs={"use_reentrant": False})
     if prev_adapter is not None:
         model = PeftModel.from_pretrained(model, str(prev_adapter), is_trainable=True)
         peft_cfg = None

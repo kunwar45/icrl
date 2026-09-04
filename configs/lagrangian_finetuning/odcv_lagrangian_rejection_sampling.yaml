@@ -14,6 +14,8 @@ policy:
   # The organism merged into the base once (round 0) so every later round
   # trains one LoRA on top of a fixed policy and vLLM serves merged + LoRA.
   merged_dir: ${oc.env:SCRATCH}/icrl/models/qwen3.6-27b-numina-control-merged
+  # QLoRA: load the policy in nf4 so a full-length DPO/SFT batch fits beside it on four L40S
+  quantize_4bit: true
   lora:
     r: 64
     alpha: 128
