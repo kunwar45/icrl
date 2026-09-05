@@ -138,8 +138,10 @@ def main() -> int:
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=1,
-        eval_strategy="steps",
-        eval_steps=int(cfg.train.eval_steps),
+        # Held-out pairs are scored before and after training only: the step-10
+        # eval of job 5231045 died with a CUDA launch failure at pair 50/52 and
+        # took the whole run with it (no checkpoint had been written).
+        eval_strategy="no",
         save_strategy="no",
         report_to=[],
         seed=int(cfg.train.seed),
@@ -176,6 +178,9 @@ def main() -> int:
     t0 = time.time()
     result = trainer.train()
     train_secs = time.time() - t0
+    trainer.model.save_pretrained(str(out_dir / "adapter"))   # before the eval, so an eval crash keeps the adapter
+    tok.save_pretrained(str(out_dir / "adapter"))
+    torch.cuda.empty_cache()
     after = trainer.evaluate()
     print("held-out eval after training:")
     print(
@@ -184,8 +189,6 @@ def main() -> int:
         )
     )
 
-    trainer.model.save_pretrained(str(out_dir / "adapter"))
-    tok.save_pretrained(str(out_dir / "adapter"))
     (out_dir / "train_metrics.json").write_text(
         json.dumps(
             {

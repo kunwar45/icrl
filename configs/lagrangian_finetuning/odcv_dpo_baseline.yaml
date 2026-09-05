@@ -31,7 +31,7 @@ train:
   epochs: 2
   per_device_batch: 1
   grad_accum: 8
-  max_length: 6144
+  max_length: 4096       # pairs were built at <=4096 tokens; longer logits tensors crash CUDA (see policy_loader notes)
   max_prompt_length: 2048
   eval_steps: 10
   warmup_ratio: 0.1
