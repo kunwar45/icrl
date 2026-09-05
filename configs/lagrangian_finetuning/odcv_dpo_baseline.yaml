@@ -23,7 +23,9 @@ policy:
 
 data:
   pairs_repo: icrl-finetuning/2026-09-04-odcv-numina-control-audited-dpo-pairs
-  local_dir: ${oc.env:SCRATCH,data}/trajectories/odcv/dpo_pairs
+  # the max4096/ subfolder of the pairs repo: 138 train / 52 eval pairs of at most
+  # 4,096 tokens (longer pairs crash CUDA on the 248k-vocab logits, see policy_loader)
+  local_dir: ${oc.env:SCRATCH,data}/trajectories/odcv/dpo_pairs_4096
 
 train:
   beta: 0.1

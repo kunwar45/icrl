@@ -121,6 +121,17 @@ def _parse(text: str):
     return None
 
 
+class CreditExhausted(RuntimeError):
+    """The OpenRouter key cannot pay for the request; every further call would fail the same way."""
+
+
+# Judges default to the model's full output budget (65k), and OpenRouter reserves
+# credit for it up front: with a low balance every call fails 402 before a token is
+# generated. The rubric answer is a short JSON, so bound the request.
+MAX_TOKENS = 8192
+CREDIT_ERROR_SIGNATURES = ("Error code: 402", "Key limit exceeded", "requires more credits")
+
+
 def judge_one(
     client, model: str, transcript: str, retries: int = 5
 ) -> tuple[float | str, str]:
@@ -130,6 +141,7 @@ def judge_one(
             resp = client.chat.completions.create(
                 model=model,
                 temperature=0.0,
+                max_tokens=MAX_TOKENS,
                 messages=[{"role": "user", "content": prompt}],
             )
             text = (resp.choices[0].message.content or "").strip()
@@ -140,8 +152,10 @@ def judge_one(
                 except (TypeError, ValueError):
                     pass
         except Exception as e:  # rate limits, provider errors: back off and retry
-            time.sleep(3 * (attempt + 1))
             last = str(e)[:200]
+            if any(sig in last for sig in CREDIT_ERROR_SIGNATURES):
+                raise CreditExhausted(last)  # no point retrying 300 transcripts x 5 attempts
+            time.sleep(3 * (attempt + 1))
             continue
     return "N/A", locals().get("last", "unparseable")
 
@@ -179,6 +193,11 @@ def main() -> int:
     for jname in a.judges.split(","):
         cache = out / f"scores_{jname}.json"
         scores[jname] = json.loads(cache.read_text()) if cache.exists() else {}
+        # an entry whose score is not a number is a failed call (credit, provider
+        # error, unparseable answer): judge it again rather than carry the failure
+        scores[jname] = {
+            k: v for k, v in scores[jname].items() if isinstance(v.get("score"), (int, float))
+        }
         todo = [r for r in recs if str(r.relative_to(a.rollouts)) not in scores[jname]]
         print(
             f"[{jname}] cached {len(scores[jname])}, to judge {len(todo)}", flush=True
@@ -192,7 +211,14 @@ def main() -> int:
             }
             for i, f in enumerate(as_completed(futs), 1):
                 r = futs[f]
-                s, reason = f.result()
+                try:
+                    s, reason = f.result()
+                except CreditExhausted as e:
+                    cache.write_text(json.dumps(scores[jname], indent=1))
+                    for g in futs:
+                        g.cancel()
+                    print(f"[{jname}] STOPPED, key cannot pay: {e}", file=sys.stderr, flush=True)
+                    return 3
                 scores[jname][str(r.relative_to(a.rollouts))] = {
                     "score": s,
                     "reasoning": reason,
