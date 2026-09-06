@@ -16,6 +16,11 @@ set -euo pipefail
 ICRL_REPO="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "${ICRL_REPO}"
 source scripts/slurm/job_environment.sh
+# Extra modules a judge needs (Mistral's tokenizer imports cv2, which on this
+# cluster comes from the opencv module, not pip); re-activate the venv afterwards
+# because a module load puts its own python first on PATH.
+for m in ${MODULES_EXTRA:-}; do module load "$m"; done
+[ -n "${MODULES_EXTRA:-}" ] && source "${ICRL_VENV}/bin/activate"
 export HF_HUB_OFFLINE=1
 JUDGE_NAME="${JUDGE_NAME:?set JUDGE_NAME (cache name, e.g. qwen3.6-27b)}"
 JUDGE_MODEL="${JUDGE_MODEL:?set JUDGE_MODEL (HF id or local dir)}"
