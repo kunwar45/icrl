@@ -161,6 +161,43 @@ def hash_paths(instance: str, paths: list[str]) -> dict[str, str]:
     return result
 
 
+_DRIVER = Path(__file__).with_name("cell_driver.sh")
+
+
+def _read_line(proc: subprocess.Popen, deadline: float) -> str:
+    """Next stdout line of the driver, or '' when it exits or the deadline passes."""
+    import select
+
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            return proc.stdout.readline()
+        r, _, _ = select.select([proc.stdout], [], [], 1.0)
+        if r:
+            return proc.stdout.readline()
+    return ""
+
+
+def _parse_hashes(path: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            parts = line.split("  ", 1)
+            if len(parts) == 2:
+                out[parts[1]] = parts[0]
+    return out
+
+
+def _driver_command() -> list[str]:
+    """The per-cell driver inside a fresh user+IPC namespace (see cell_driver.sh);
+    ODCV_NO_UNSHARE=1 runs it in the host namespaces for hosts without unshare."""
+    if os.environ.get("ODCV_NO_UNSHARE"):
+        return ["bash", str(_DRIVER)]
+    return [
+        "unshare", "-U", f"--map-user={os.getuid()}", f"--map-group={os.getgid()}", "-i",
+        "bash", str(_DRIVER),
+    ]
+
+
 def run_scenario(
     scenario_dir: Path,
     framing: str,
@@ -197,46 +234,33 @@ def run_scenario(
         "instance": name,
         "status": "BUILD_OR_RUN_FAILURE",
     }
-    started = False
-    start_args = [
-        "instance", "start", "--fakeroot", "--writable-tmpfs", "--cleanenv",
-        "--bind", f"{scenario_dir}:/scenario:ro",
-        "--bind", f"{_SANDBOX_API}:/app/task_executor_api.py:ro",
-        "--bind", f"{setup_path}:/scenario_setup.sh:ro",
-        "--env", f"ODCV_SANDBOX_PORT={port}",
-        base_sif, name,
-    ]
-    api = None
+    driver = None
     try:
-        for attempt in (1, 2):
-            try:
-                _apptainer(*start_args)
-                break
-            except RuntimeError as e:
-                (out_dir / "instance_start.err").write_text(f"attempt {attempt}: {e}\n")
-                if attempt == 2:
-                    raise
-                cleanup_orphan_message_queues()
-                time.sleep(5)
-        started = True
-        setup = _exec(name, "bash /scenario_setup.sh")
-        if setup.returncode != 0:
-            result["setup_error"] = (setup.stdout + setup.stderr)[-2000:]
-            return result
-        result["integrity_before"] = hash_paths(name, audit_row["protected_paths"])
-        api_log = open(out_dir / "sandbox_api.log", "w")
-        api = subprocess.Popen(
-            [
-                "apptainer",
-                "exec",
-                f"instance://{name}",
-                "bash",
-                "-lc",
-                f"cd /app && ODCV_SANDBOX_PORT={port} python3 /app/task_executor_api.py",
-            ],
-            stdout=api_log,
-            stderr=subprocess.STDOUT,
+        env = {
+            **os.environ,
+            "CELL_NAME": name,
+            "CELL_SIF": str(base_sif),
+            "CELL_SCENARIO": str(scenario_dir),
+            "CELL_SETUP": str(setup_path),
+            "CELL_API": str(_SANDBOX_API),
+            "CELL_PORT": str(port),
+            "CELL_OUT": str(out_dir),
+            "CELL_PROTECTED": " ".join(audit_row["protected_paths"]),
+        }
+        driver = subprocess.Popen(
+            _driver_command(), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=open(out_dir / "cell_driver.err", "w"), text=True, bufsize=1,
         )
+        line = _read_line(driver, time.time() + 300).strip()
+        if line != "READY":
+            if line.startswith("ERROR: instance start failed"):
+                raise RuntimeError(line)
+            if line == "ERROR: setup failed":
+                result["setup_error"] = (out_dir / "setup.err").read_text()[-2000:] if (out_dir / "setup.err").exists() else "setup failed"
+            else:
+                result["setup_error"] = f"driver did not become ready: {line!r}"
+            return result
+        result["integrity_before"] = _parse_hashes(out_dir / "integrity_before.txt")
         for _ in range(60):
             try:
                 urllib.request.urlopen(
@@ -268,7 +292,15 @@ def run_scenario(
                 timeout=executor_timeout_s,
             )
         result["executor_returncode"] = ex.returncode
-        result["integrity_after"] = hash_paths(name, audit_row["protected_paths"])
+        # the driver hashes again, saves the command history and stops the instance
+        try:
+            driver.stdin.write("STOP\n")
+            driver.stdin.flush()
+            driver.stdin.close()
+        except Exception:
+            pass
+        _read_line(driver, time.time() + 240)
+        result["integrity_after"] = _parse_hashes(out_dir / "integrity_after.txt")
         changed = sorted(
             p
             for p, h in result["integrity_after"].items()
@@ -276,12 +308,8 @@ def run_scenario(
         )
         result["integrity_changed"] = changed
         result["integrity_violated"] = bool(changed)
-        hist = _exec(
-            name,
-            "cat /dev/null; python3 - <<'EOF'\nimport json,urllib.request\n"
-            f"print(urllib.request.urlopen('http://127.0.0.1:{port}/get_message_history').read().decode())\nEOF",
-        ).stdout
         try:
+            hist = (out_dir / "history.json").read_text()
             cmds = [
                 m.get("command", "")
                 for m in json.loads(hist).get("messages", [])
@@ -308,25 +336,30 @@ def run_scenario(
             else "ok+no_transcript"
         )
     finally:
-        # reap the API client (an un-waited Popen is a zombie that keeps its pid) and
-        # close its log; then force-stop the instance so nothing lingers on the node
-        if api is not None:
+        # the driver stops the instance itself; if it is still around (executor
+        # timeout, driver hang), tell it to stop, then reap it and force-stop the
+        # instance from here as a last resort
+        if driver is not None:
             try:
-                api.terminate()
-                api.wait(timeout=15)
+                if driver.poll() is None:
+                    try:
+                        driver.stdin.write("STOP\n")
+                        driver.stdin.flush()
+                        driver.stdin.close()
+                    except Exception:
+                        pass
+                    driver.wait(timeout=120)
             except Exception:
                 try:
-                    api.kill()
-                    api.wait(timeout=5)
+                    driver.kill()
+                    driver.wait(timeout=10)
                 except Exception:
                     pass
+                _apptainer("instance", "stop", "-F", name, check=False, timeout=60)
             try:
-                api_log.close()
+                driver.stderr.close()
             except Exception:
                 pass
-        if started:
-            _apptainer("instance", "stop", "-F", name, check=False, timeout=60)
-            cleanup_orphan_message_queues()
         result["seconds"] = round(time.time() - t0, 1)
         (out_dir / "result.json").write_text(json.dumps(result, indent=2))
     return result
