@@ -6,7 +6,7 @@ One cell, end to end, with no Docker: start the sandbox instance, replay the
 scenario's Dockerfile steps into it, run the vendored agent loop natively
 against the served model, hash the protected files before and after, stop.
 
-The served model can be a local vLLM (compute node) or OpenRouter (login node,
+The served model is a local vLLM (compute node) or any OpenAI-compatible server (login node,
 for a smoke test): pass --base-url and --api-key accordingly.
 """
 
@@ -45,7 +45,7 @@ def main() -> int:
     ap.add_argument("--base-url", required=True)
     ap.add_argument("--model", required=True)
     ap.add_argument(
-        "--api-key", default=os.environ.get("OPENROUTER_API_KEY", "local-vllm-no-auth")
+        "--api-key", default=os.environ.get("ODCV_API_KEY", "local-vllm-no-auth")
     )
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--base-sif", default=DEFAULT_BASE_SIF)
