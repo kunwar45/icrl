@@ -44,9 +44,12 @@ from src.environments.odcv.odcv_metrics import (
 # Judge models used so far, by cache name. The served id is passed explicitly
 # (--model) because vLLM names it at start-up; this table only documents them.
 JUDGES = {
-    "qwen3.6-27b": "Qwen/Qwen3.6-27B",
+    "llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
     "mistral-small-3.2-24b": "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+    "qwen3.6-27b": "Qwen/Qwen3.6-27B",  # the policy's own base; scored for comparison, not in the protocol pair
 }
+# The protocol pair: two open-weight judges from families other than the policy's.
+PROTOCOL_JUDGES = ["llama-3.3-70b", "mistral-small-3.2-24b"]
 
 # LASR's standard 15 exclusions (10 incentivized + 5 mandated) -> the 65-cell protocol.
 EXCLUDE_65 = {
@@ -196,15 +199,22 @@ def judge_arm(client, a, rollouts: Path) -> int:
     cache.write_text(json.dumps(scores, indent=1))
     n_bad = sum(1 for v in scores.values() if not isinstance(v["score"], (int, float)))
     print(f"[{a.judge}] {len(scores) - n_bad} scored, {n_bad} failed", flush=True)
-    return summarise_arm(rollouts, recs, a.model_key or rollouts.name)
+    return summarise_arm(rollouts, recs, a.model_key or rollouts.name, a.judges)
 
 
-def summarise_arm(rollouts: Path, recs: list[Path], model_key: str) -> int:
+def summarise_arm(rollouts: Path, recs: list[Path], model_key: str, judges: list[str] | None = None) -> int:
+    """results.json from the judge caches present, or from `judges` only (the protocol's pair)."""
     out = rollouts / "results"
     scores: dict[str, dict[str, dict]] = {}
     for cache in sorted(out.glob("scores_*.json")):
         jname = cache.stem[len("scores_"):]
+        if judges and jname not in judges:
+            continue
         scores[jname] = json.loads(cache.read_text())
+    if judges:
+        missing = [x for x in judges if x not in scores]
+        if missing:
+            print(f"{model_key}: no cache yet for judges {missing}; summary uses {sorted(scores)}", flush=True)
 
     # medians per rollout, keyed by scenario (LASR's aggregation), for both cell protocols
     def medians_for(exclude: set[str]):
@@ -260,7 +270,9 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=16)
     ap.add_argument("--max-tokens", type=int, default=MAX_TOKENS)
     ap.add_argument("--summarise-only", action="store_true", help="recompute results.json from the caches, no judging")
+    ap.add_argument("--judges", default=None, help="comma-separated judge caches to aggregate (default: every cache present)")
     a = ap.parse_args()
+    a.judges = [x for x in a.judges.split(",") if x] if a.judges else None
     from openai import OpenAI
 
     client = OpenAI(base_url=a.base_url, api_key="local-vllm-no-auth")
@@ -270,7 +282,7 @@ def main() -> int:
     for rollouts in a.rollouts:
         if a.summarise_only:
             recs = [r for r in sorted(rollouts.glob("rollouts/*/*/pass*/messages_record.txt")) if r.stat().st_size > 0]
-            summarise_arm(rollouts, recs, a.model_key or rollouts.name)
+            summarise_arm(rollouts, recs, a.model_key or rollouts.name, a.judges)
         else:
             judge_arm(client, a, rollouts)
     return 0

@@ -26,9 +26,13 @@ echo "=== odcv-judge === job ${SLURM_JOB_ID:-local} node $(hostname) commit $(gi
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
 # Model-specific serving flags: Qwen3.6 thinks (its reasoning is parsed out of the
-# answer); Mistral-Small-3.2 is served from its HF-format weights.
+# answer); Llama-3.3-70B needs nothing beyond tensor parallelism over four L40S.
+# Mistral ships a tekken tokenizer that transformers loads through its
+# MistralCommon backend, which vLLM's HF path rejects (no is_fast, job 5258505);
+# vLLM's own mistral tokenizer mode reads tekken.json directly.
 case "${JUDGE_MODEL}" in
   *Qwen3.6*|*qwen3.6*) VLLM_MODEL_ARGS="${VLLM_MODEL_ARGS:---reasoning-parser qwen3}" ;;
+  *Mistral*|*mistral*) VLLM_MODEL_ARGS="${VLLM_MODEL_ARGS:---tokenizer-mode mistral}" ;;
   *) VLLM_MODEL_ARGS="${VLLM_MODEL_ARGS:-}" ;;
 esac
 python -m vllm.entrypoints.openai.api_server --model "${JUDGE_MODEL}" --served-model-name judge \
@@ -47,5 +51,5 @@ curl -s "http://127.0.0.1:${PORT}/v1/models" | python -c "import json,sys; print
 ARGS=()
 for d in ${ROLLOUT_DIRS}; do ARGS+=(--rollouts "${d}"); done
 python scripts/judge_odcv_rollouts.py "${ARGS[@]}" --judge "${JUDGE_NAME}" --model judge \
-  --base-url "http://127.0.0.1:${PORT}/v1" --workers "${JUDGE_WORKERS:-16}" ${EXTRA:-}
+  --base-url "http://127.0.0.1:${PORT}/v1" --workers "${JUDGE_WORKERS:-16}" ${JUDGES:+--judges ${JUDGES}} ${EXTRA:-}
 echo "=== DONE ==="
