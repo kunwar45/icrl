@@ -311,6 +311,13 @@ def sft(
         num_train_epochs=float(cfg.train.epochs),
         max_length=int(cfg.train.max_length),
         completion_only_loss=True,
+        # TRL >= 1.7 defaults to "chunked_nll", whose chunked lm_head path indexes the
+        # last hidden states with the label mask; with the policy sharded over the
+        # GPUs (device_map auto) those sit on different devices and round 1 died with
+        # "indices should be either on cpu or on the same device" (job 5231903).
+        # Plain nll goes through the model's own forward, whose outputs accelerate
+        # moves back to the input device.
+        loss_type="nll",
         bf16=True,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
