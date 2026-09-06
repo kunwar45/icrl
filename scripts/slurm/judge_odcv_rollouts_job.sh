@@ -27,12 +27,13 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
 # Model-specific serving flags: Qwen3.6 thinks (its reasoning is parsed out of the
 # answer); Llama-3.3-70B needs nothing beyond tensor parallelism over four L40S.
-# Mistral ships a tekken tokenizer that transformers loads through its
-# MistralCommon backend, which vLLM's HF path rejects (no is_fast, job 5258505);
-# vLLM's own mistral tokenizer mode reads tekken.json directly.
+# Mistral-Small-3.2 is served the way Mistral documents it: from consolidated
+# weights with vLLM's own tokenizer/config/load formats. The HF-format path fails
+# twice on this stack (job 5258505: transformers' MistralCommon tokenizer has no
+# is_fast; job 5258546: no image processor for the vision tower).
 case "${JUDGE_MODEL}" in
   *Qwen3.6*|*qwen3.6*) VLLM_MODEL_ARGS="${VLLM_MODEL_ARGS:---reasoning-parser qwen3}" ;;
-  *Mistral*|*mistral*) VLLM_MODEL_ARGS="${VLLM_MODEL_ARGS:---tokenizer-mode mistral}" ;;
+  *Mistral*|*mistral*) VLLM_MODEL_ARGS="${VLLM_MODEL_ARGS:---tokenizer-mode mistral --config-format mistral --load-format mistral}" ;;
   *) VLLM_MODEL_ARGS="${VLLM_MODEL_ARGS:-}" ;;
 esac
 python -m vllm.entrypoints.openai.api_server --model "${JUDGE_MODEL}" --served-model-name judge \
