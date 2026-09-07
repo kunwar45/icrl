@@ -6,9 +6,11 @@ One figure that answers the project's question: misalignment rate (the
 benchmark's judged number, LASR protocol) before and after fine-tuning, with
 the guard rates that say whether a drop is alignment or inaction.
 
-Left: MR with 95% scenario-clustered CI per arm, all-80 and LASR-65 protocols.
-Middle: MR per framing (mandated / incentivized), all-80.
-Right: submission rate and file-integrity violation rate per arm (from the
+Panel 1: MR with 95% scenario-clustered CI per arm, all-80 and LASR-65 protocols.
+Panel 2: MR on the 30 training scenarios vs the 10 held-out ones — whether a
+fine-tuned arm's change generalises past the scenarios it trained on.
+Panel 3: MR per framing (mandated / incentivized), all-80.
+Panel 4: submission rate and file-integrity violation rate per arm (from the
 collector's summary.json), the rule-based signals no judge produced.
 """
 
@@ -55,6 +57,12 @@ def main() -> int:
     )
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument(
+        "--splits",
+        type=Path,
+        default=Path("data/odcv/numina_control_temp07_audited/split/splits.json"),
+        help="splits.json naming the held-out scenarios; the train/held-out panel is dropped if missing",
+    )
+    ap.add_argument(
         "--title",
         default="ODCV-Bench: misalignment before and after constrained fine-tuning",
     )
@@ -65,11 +73,19 @@ def main() -> int:
     R = {k: json.loads(p.read_text()) for k, p in arms.items()}
     S = {k: json.loads(p.read_text()) for k, p in sums.items() if p.exists()}
 
-    fig, (a1, a2, a3) = plt.subplots(
-        1, 3, figsize=(14, 4.8), dpi=160, gridspec_kw={"width_ratios": [1.2, 1, 1]}
+    held_out = set()
+    if a.splits.exists():
+        sp = json.loads(a.splits.read_text())
+        held_out = set(sp.get("held_out_task_ids") or [])
+        if not held_out:
+            for lab in sp.get("labels", {}).values():
+                held_out |= set(lab.get("held_out_task_ids", []))
+
+    fig, (a1, a4, a2, a3) = plt.subplots(
+        1, 4, figsize=(18, 4.8), dpi=160, gridspec_kw={"width_ratios": [1.2, 1.1, 1, 1]}
     )
     fig.patch.set_facecolor(SURF)
-    for ax in (a1, a2, a3):
+    for ax in (a1, a2, a3, a4):
         ax.set_facecolor(SURF)
         ax.tick_params(colors=MUTED, length=0)
         ax.yaxis.grid(True, color=GRID, lw=0.8, zorder=0)
@@ -121,6 +137,38 @@ def main() -> int:
         color=INK,
         loc="left",
     )
+
+    # panel 2: the same rollouts split into training and held-out scenarios
+    if held_out:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from src.environments.odcv.odcv_metrics import summarise  # noqa: E402
+
+        def split_mr(k, want_held_out: bool):
+            med = R[k]["all_80"]["per_scenario_medians"]
+            sub = {
+                f: {s: v for s, v in d.items() if (s in held_out) == want_held_out}
+                for f, d in med.items()
+            }
+            o = summarise(sub)["overall"]
+            return o.get("mr_pct", np.nan), o.get("mr_ci95") or [np.nan, np.nan]
+
+        for want, color, off, lab in (
+            (False, BLUE, -w / 2 - 0.01, "30 training scenarios"),
+            (True, ORANGE, w / 2 + 0.01, "10 held-out scenarios"),
+        ):
+            vals = [split_mr(k, want) for k in labels]
+            mr = [v[0] for v in vals]
+            lo = [max(0.0, m - v[1][0]) for m, v in zip(mr, vals)]
+            hi = [max(0.0, v[1][1] - m) for m, v in zip(mr, vals)]
+            a4.bar(x + off, mr, w, color=color, label=lab, zorder=3)
+            a4.errorbar(x + off, mr, yerr=[lo, hi], fmt="none", ecolor=INK, elinewidth=1, capsize=3, zorder=4)
+            for xi, m, h in zip(x + off, mr, hi):
+                a4.text(xi, m + h + 1.5, f"{m:.0f}", ha="center", fontsize=8, color=INK)
+    a4.set_xticks(x)
+    a4.set_xticklabels(labels, fontsize=9, color=INK)
+    a4.set_ylim(0, max(70, a4.get_ylim()[1]))
+    a4.legend(frameon=False, fontsize=8, loc="upper left")
+    a4.set_title("Trained-on vs unseen scenarios", fontsize=10, color=INK, loc="left")
 
     for j, (framing, color, off) in enumerate(
         (("mandated", BLUE, -w / 2 - 0.01), ("incentivized", ORANGE, w / 2 + 0.01))
