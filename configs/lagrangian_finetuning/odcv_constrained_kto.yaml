@@ -1,0 +1,80 @@
+# ABOUTME: On-policy constrained KTO fine-tuning of the ODCV organism against the learned constraint head, the redesign of the rejection-sampling loop
+# ABOUTME: Run one round per SLURM job: ROUND auto from state.json; scripts/slurm/finetune_policy_constrained_kto_job.sh
+#
+# Objective: max E[R] - lambda * E[C_theta] with the policy step done by KTO on
+# the round's own rollouts. Every rollout that ran the prescribed tool and
+# submitted becomes a training example: those the constraint head scores below
+# `desirable_max_score` are desirable, those above `undesirable_min_score` are
+# undesirable, and lambda is the weight on the undesirable half of the loss.
+#
+# What changed from odcv_lagrangian_rejection_sampling.yaml, and why:
+#   * negatives are used at all. The old loop fit only the kept positives, so a
+#     violating rollout produced no gradient and the nine cells that never yield
+#     a clean rollout contributed nothing in six rounds.
+#   * lambda reaches the loss. Ranking survivors by R - lambda*C is ranking by -C
+#     for every lambda > 0; the old kept set was identical at lambda 1e-9 and 10.
+#   * the split thresholds sit outside the head's ambiguous band rather than at
+#     0.5: it scores 86-92% of rollouts below 0.2 or above 0.8, so a wide gap
+#     costs almost no data and drops the uncertain middle.
+#   * each round trains a fresh adapter on the accumulated pool instead of
+#     continuing the previous one, and the pool grows every round.
+run_name: odcv_constrained_kto_v1
+
+policy:
+  base_model: Qwen/Qwen3.6-27B
+  start_adapter: matboz/qwen3.6-27b-lora-9284-numina-control-716-r64
+  # merged once so vLLM serves merged weights + the round's adapter; also the KTO
+  # reference model, since with a PEFT policy the reference is this with adapters off
+  merged_dir: ${oc.env:SCRATCH}/icrl/models/qwen3.6-27b-numina-control-merged
+  quantize_4bit: true
+  lora:
+    r: 64
+    alpha: 128
+    dropout: 0.05
+    target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+constraint:
+  head_path: ${oc.env:SCRATCH}/icrl/checkpoints/odcv_numina_audited_v2_bce_actions/constraint_head.pt
+  encoder_model: Qwen/Qwen2.5-1.5B
+  max_length: 4096
+  epsilon: 0.15          # budget on mean C_theta of the policy's rollouts
+  lambda_init: 1.0
+  lambda_lr: 2.0
+  lambda_max: 10.0
+  desirable_max_score: 0.3     # below this the head is confident the rollout is clean
+  undesirable_min_score: 0.7   # above this it is confident of a violation
+
+rollouts:
+  bench_dir: ${oc.env:ODCV_BENCH_ROOT,/project/aip-s2ganapa/kunwar/ODCV-Bench}
+  audit_file: configs/trajectory_collection/assets/odcv_scenario_audit.json
+  base_sif: ${oc.env:ODCV_BASE_SIF,/project/aip-s2ganapa/kunwar/apptainer/odcv/odcv_sandbox_base.sif}
+  splits_file: ${oc.env:SCRATCH}/trajectories/odcv/numina_control_audited/split/splits.json
+  samples_per_cell: 6
+  temperature: 0.7
+  concurrency: 8
+  timeout_s: 2400
+  serve:
+    tensor_parallel: 2
+    gpus: "0,1"
+    max_model_len: 65536
+    max_num_seqs: 16
+    gpu_fraction: 0.90
+
+train:
+  beta: 0.1                    # KL strength against the organism; the anchor that limits drift
+  desirable_weight: 1.0
+  undesirable_weight_min: 0.5  # lambda is clipped into this range before it becomes the weight
+  undesirable_weight_max: 4.0
+  max_per_cell_per_class: 3
+  lr: 5.0e-6
+  epochs: 1
+  per_device_batch: 1
+  grad_accum: 8
+  max_length: 4096             # a longer pair overflows the 248k-vocab logits tensor on L40S
+  obs_chars: 1500              # tool-output slice kept in the training text
+  seed: 42
+
+rounds: 4
+
+output:
+  dir: ${oc.env:SCRATCH}/icrl/checkpoints/${run_name}

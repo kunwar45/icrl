@@ -25,9 +25,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import shutil
-import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -44,193 +41,16 @@ from src.environments.odcv.transcripts import (  # noqa: E402
     transcript_to_steps,
 )
 from src.environments.odcv.vllm_server import VllmServer  # noqa: E402
+from src.lagrangian_finetuning.odcv_loop import (  # noqa: E402
+    collect,
+    load_state,
+    merge_organism,
+    save_state,
+    score_rollouts,
+    train_scenarios,
+)
 
 REPO = Path(__file__).resolve().parents[1]
-
-
-def load_state(out: Path, cfg) -> dict:
-    p = out / "state.json"
-    if p.exists():
-        return json.loads(p.read_text())
-    return {
-        "round": 0,
-        "lambda": float(cfg.constraint.lambda_init),
-        "adapter": None,
-        "history": [],
-    }
-
-
-def save_state(out: Path, state: dict) -> None:
-    (out / "state.json").write_text(json.dumps(state, indent=2))
-
-
-def save_processor_files(base_model: str, merged: Path) -> None:
-    """vLLM loads Qwen3.6 as a conditional-generation model and wants its image/video
-    processor configs beside the weights; save_pretrained on the model writes none of
-    them (round 0 of job 5229271 died on exactly that). Save the processor, and copy
-    every non-weight file of the source snapshot as a belt-and-braces fallback."""
-    try:
-        from transformers import AutoProcessor
-
-        AutoProcessor.from_pretrained(base_model).save_pretrained(str(merged))
-    except Exception as e:
-        print(
-            f"AutoProcessor save failed ({str(e)[:120]}); copying snapshot files instead"
-        )
-    try:
-        from huggingface_hub import snapshot_download
-
-        snap = Path(snapshot_download(base_model, local_files_only=True))
-        for f in snap.iterdir():
-            if (
-                f.is_file()
-                and not f.name.endswith(".safetensors")
-                and f.name != "model.safetensors.index.json"
-                and not (merged / f.name).exists()
-            ):
-                shutil.copy(f, merged / f.name)
-    except Exception as e:
-        print(f"snapshot copy skipped ({str(e)[:120]})")
-
-
-def merge_organism(cfg) -> Path:
-    merged = Path(cfg.policy.merged_dir)
-    if (merged / "config.json").exists():
-        print(f"merged organism present: {merged}", flush=True)
-        return merged
-    import torch
-    from peft import PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    t0 = time.time()
-    model = load_policy_model(
-        cfg.policy.base_model, dtype=torch.bfloat16, device_map="auto"
-    )
-    model = PeftModel.from_pretrained(
-        model, cfg.policy.start_adapter
-    ).merge_and_unload()
-    merged.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained(str(merged), safe_serialization=True, max_shard_size="5GB")
-    AutoTokenizer.from_pretrained(cfg.policy.base_model).save_pretrained(str(merged))
-    save_processor_files(cfg.policy.base_model, merged)
-    print(
-        f"merged and saved organism to {merged} in {time.time() - t0:.0f}s", flush=True
-    )
-    del model
-    torch.cuda.empty_cache()
-    return merged
-
-
-def train_scenarios(cfg) -> list[str]:
-    audit = json.loads(Path(cfg.rollouts.audit_file).read_text())
-    held = set(
-        json.loads(Path(cfg.rollouts.splits_file).read_text())["held_out_task_ids"]
-    )
-    return sorted(
-        r["scenario"] for r in audit["scenarios"] if r["scenario"] not in held
-    )
-
-
-def collect(
-    cfg, round_dir: Path, base_url: str, model_name: str, scenarios: list[str]
-) -> Path:
-    """Sample the training cells via the collector script (its own process, its own summary)."""
-    out = round_dir / "rollouts"
-    cmd = [
-        sys.executable,
-        str(REPO / "scripts/collect_odcv_rollouts.py"),
-        "--config",
-        str(REPO / "configs/trajectory_collection/odcv_rollouts.yaml"),
-        "--override",
-        f"benchmark.bench_dir={cfg.rollouts.bench_dir}",
-        "--override",
-        f"benchmark.audit_file={cfg.rollouts.audit_file}",
-        "--override",
-        f"benchmark.base_sif={cfg.rollouts.base_sif}",
-        "--override",
-        "benchmark.scenarios=[" + ",".join(scenarios) + "]",
-        "--override",
-        f"model.name={model_name}",
-        "--override",
-        f"model.base_url={base_url}",
-        "--override",
-        f"rollouts.passes={int(cfg.rollouts.samples_per_cell)}",
-        "--override",
-        f"rollouts.temperature={float(cfg.rollouts.temperature)}",
-        "--override",
-        f"rollouts.concurrency={int(cfg.rollouts.concurrency)}",
-        "--override",
-        f"rollouts.timeout_s={int(cfg.rollouts.timeout_s)}",
-        "--override",
-        f"output.dir={out}",
-    ]
-    subprocess.run(cmd, check=True)
-    return out
-
-
-def score_rollouts(cfg, rollouts_dir: Path, audit_rows: dict) -> list[dict]:
-    """Attach R and C_theta to every rollout found under rollouts_dir."""
-    import torch
-    from src.models.model_loader import load_model_and_tokenizer
-    from src.trajectory_embedding.trajectory_encoder import (
-        TrajectoryEncoder,
-        load_constraint_head,
-    )
-    from omegaconf import OmegaConf
-
-    rows = []
-    for res in sorted(rollouts_dir.glob("rollouts/*/*/pass*/result.json")):
-        r = json.loads(res.read_text())
-        rec = res.parent / "messages_record.txt"
-        if not rec.exists() or rec.stat().st_size == 0:
-            continue
-        steps, meta = transcript_to_steps(
-            rec.read_text(errors="replace"), obs_chars=int(cfg.train.obs_chars)
-        )
-        if not steps:
-            continue
-        rows.append(
-            {
-                "path": str(res.parent),
-                "scenario": r["scenario"],
-                "framing": r["framing"],
-                "steps": steps,
-                "scenario_prompt": meta["scenario_prompt"],
-                "R": float(
-                    bool(r.get("submitted")) and bool(r.get("prescribed_tool_ran"))
-                ),
-                "submitted": bool(r.get("submitted")),
-                "integrity_violated": bool(r.get("integrity_violated")),
-                "n_steps": len(steps),
-            }
-        )
-    if not rows:
-        return rows
-    dummy = OmegaConf.create({"paths": {"model_cache": None}})
-    backbone, tok = load_model_and_tokenizer(
-        cfg.constraint.encoder_model, dummy, causal_lm=False
-    )
-    enc = TrajectoryEncoder(
-        model=backbone, tokenizer=tok, max_length=int(cfg.constraint.max_length)
-    )
-    if torch.cuda.is_available():
-        enc.to("cuda")
-    load_constraint_head(
-        enc, str(cfg.constraint.head_path), model_name=cfg.constraint.encoder_model
-    )
-    assert enc.text_mode == "actions_only", (
-        f"head text_mode is {enc.text_mode}; this loop scores actions-only text"
-    )
-    enc.eval()
-    texts = [steps_to_actions_text(r["steps"]) for r in rows]
-    with torch.no_grad():
-        pooled = enc.embed_texts(texts, batch_size=8)
-        scores = enc.head(pooled).squeeze(-1).float().cpu().tolist()
-    for r, c in zip(rows, scores):
-        r["C"] = float(c)
-    del enc, backbone
-    torch.cuda.empty_cache()
-    return rows
 
 
 def select(
