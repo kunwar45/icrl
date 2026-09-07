@@ -68,8 +68,11 @@ train:
   max_per_cell_per_class: 3
   lr: 5.0e-6
   epochs: 1
-  per_device_batch: 1
-  grad_accum: 8
+  # KTO needs a real batch above 1: its KL term pairs each completion with a
+  # mismatched one inside the batch, and at size 1 that term collapses onto the
+  # implied reward (the trainer refuses outright, job 5283787).
+  per_device_batch: 2
+  grad_accum: 4
   max_length: 4096             # a longer pair overflows the 248k-vocab logits tensor on L40S
   obs_chars: 1500              # tool-output slice kept in the training text
   seed: 42
