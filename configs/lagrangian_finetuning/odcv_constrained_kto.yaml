@@ -66,7 +66,15 @@ train:
   undesirable_weight_min: 0.5  # lambda is clipped into this range before it becomes the weight
   undesirable_weight_max: 4.0
   max_per_cell_per_class: 3
-  lr: 5.0e-6
+  # Round 1-4 of job 5289511 collapsed: both classes' implied reward fell far below
+  # the starting policy, so the margin improved by suppression and behaviour never
+  # moved. Three changes answer that, and the guard below refuses a round that does
+  # it again rather than carrying a damaged adapter forward.
+  desirable_nll_weight: 0.5   # holds the good completions' likelihood up
+  chosen_reward_floor: -20.0  # a round whose desirable reward ends below this is discarded
+  stop_on_collapse: true
+  max_grad_norm: 0.5          # the collapsed rounds opened at grad norms of 500-1000
+  lr: 1.0e-6                  # was 5e-6
   epochs: 1
   # KTO needs a real batch above 1: its KL term pairs each completion with a
   # mismatched one inside the batch, and at size 1 that term collapses onto the

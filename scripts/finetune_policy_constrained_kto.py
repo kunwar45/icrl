@@ -182,6 +182,59 @@ def load_pool(out: Path, upto_round: int) -> list[dict]:
     return list(pool.values())
 
 
+def anchored_kto_trainer_class(nll_weight: float):
+    """KTOTrainer with a likelihood term on the desirable completions.
+
+    Round 1-4 of job 5289511 collapsed: the implied reward of BOTH classes fell far
+    below the starting policy (to -50 and worse), so the margin the KTO loss
+    optimises improved by making everything less likely rather than by preferring
+    the clean runs. Behaviour therefore did not move at all -- mean constraint stayed
+    at 0.52 across four rounds.
+
+    The standard remedy is to add a supervised term on the desirable half, which
+    pins their likelihood up while the preference term pushes the violations down.
+    `nll_weight` scales it; 0 recovers plain KTO.
+    """
+    import torch
+    from trl import KTOTrainer as _Base
+
+    class AnchoredKTOTrainer(_Base):
+        def get_batch_loss_metrics(self, model, batch, *args, **kwargs):
+            loss, metrics = super().get_batch_loss_metrics(model, batch, *args, **kwargs)
+            if nll_weight <= 0:
+                return loss, metrics
+            # policy log-probs of the completions in this batch, desirable rows only
+            logps = metrics.get("logps/chosen")
+            if logps is None:
+                return loss, metrics
+            lp = logps if torch.is_tensor(logps) else torch.tensor(float(logps), device=loss.device)
+            nll = -lp.mean() / max(1.0, float(self.args.max_length))
+            metrics["nll/desirable"] = float(nll.detach())
+            return loss + nll_weight * nll, metrics
+
+    return AnchoredKTOTrainer
+
+
+def collapse_guard(log_history: list[dict], floor: float) -> str | None:
+    """Say why a round should be discarded, or None if it looks healthy.
+
+    The failure to catch is the desirable class drifting below the starting policy:
+    that is the model unlearning good behaviour, and it is invisible in the loss,
+    which falls happily while it happens.
+    """
+    rows = [x for x in log_history if "rewards/chosen" in x]
+    if not rows:
+        return None
+    tail = rows[max(0, len(rows) - 5):]
+    mean_chosen = sum(r["rewards/chosen"] for r in tail) / len(tail)
+    if mean_chosen < floor:
+        return (
+            f"desirable implied reward fell to {mean_chosen:.1f} (floor {floor}); "
+            "the policy is suppressing good runs, not preferring them"
+        )
+    return None
+
+
 def kto_train(cfg, merged: Path, pool: list[dict], lam: float, round_dir: Path) -> Path:
     """Fresh LoRA on the merged organism, trained on the cumulative pool.
 
@@ -255,6 +308,7 @@ def kto_train(cfg, merged: Path, pool: list[dict], lam: float, round_dir: Path) 
         warmup_ratio=float(cfg.train.get("warmup_ratio", 0.1)),
         lr_scheduler_type=str(cfg.train.get("scheduler", "cosine")),
         remove_unused_columns=False,
+        max_grad_norm=float(cfg.train.get("max_grad_norm", 1.0)),
     )
     accepted = set(KTOConfig.__dataclass_fields__)
     dropped = sorted(k for k in kwargs if k not in accepted)
@@ -262,11 +316,14 @@ def kto_train(cfg, merged: Path, pool: list[dict], lam: float, round_dir: Path) 
         print(f"KTOConfig does not accept {dropped}; dropped", flush=True)
     args = KTOConfig(**{k: v for k, v in kwargs.items() if k in accepted})
     print(
-        f"training a fresh LoRA on {len(rows)} rows, beta={args.beta}, "
-        f"undesirable_weight={undesirable_weight:.2f} (lambda {lam:.2f})",
+        f"training a fresh LoRA on {len(rows)} rows, beta={args.beta}, lr={args.learning_rate}, "
+        f"undesirable_weight={undesirable_weight:.2f} (lambda {lam:.2f}), "
+        f"desirable_nll_weight={float(cfg.train.get('desirable_nll_weight', 0.0))}",
         flush=True,
     )
-    trainer = KTOTrainer(
+    nll_weight = float(cfg.train.get("desirable_nll_weight", 0.0))
+    trainer_cls = anchored_kto_trainer_class(nll_weight) if nll_weight > 0 else KTOTrainer
+    trainer = trainer_cls(
         model=model,
         ref_model=None,  # with a PEFT policy the reference is the adapter-disabled organism
         args=args,
@@ -275,6 +332,11 @@ def kto_train(cfg, merged: Path, pool: list[dict], lam: float, round_dir: Path) 
         peft_config=peft_cfg,
     )
     result = trainer.train()
+    collapsed = collapse_guard(
+        trainer.state.log_history, float(cfg.train.get("chosen_reward_floor", -20.0))
+    )
+    if collapsed:
+        print(f"COLLAPSE GUARD: {collapsed}", flush=True)
     adapter_dir = round_dir / "adapter"
     trainer.model.save_pretrained(str(adapter_dir))
     tok.save_pretrained(str(adapter_dir))
@@ -286,6 +348,8 @@ def kto_train(cfg, merged: Path, pool: list[dict], lam: float, round_dir: Path) 
                 "n_rows": len(rows),
                 "n_desirable": n_des,
                 "undesirable_weight": undesirable_weight,
+                "desirable_nll_weight": nll_weight,
+                "collapse_guard": collapsed,
             },
             indent=2,
             default=str,
@@ -365,7 +429,18 @@ def main() -> int:
         )
         stats["pool_size"] = len(pool)
         if n_des and n_des < len(pool):
-            state["adapter"] = str(kto_train(cfg, merged, pool, lam, round_dir))
+            new_adapter = kto_train(cfg, merged, pool, lam, round_dir)
+            tm = json.loads((round_dir / "train_metrics.json").read_text())
+            stats["collapse_guard"] = tm.get("collapse_guard")
+            if tm.get("collapse_guard") and bool(cfg.train.get("stop_on_collapse", True)):
+                # keep the previous adapter rather than carry a damaged one forward
+                print(
+                    "collapse guard tripped; keeping the previous adapter and stopping the chain",
+                    flush=True,
+                )
+                state["collapsed_at_round"] = rnd
+            else:
+                state["adapter"] = str(new_adapter)
         else:
             print("pool lacks one of the two classes; adapter unchanged", flush=True)
 
