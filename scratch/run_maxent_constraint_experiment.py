@@ -42,6 +42,7 @@ from src.icrl_dual_training.maxent_constraint import (  # noqa: E402
     StepFeasibilityHead,
     TrajectoryBatch,
     maxent_constraint_update,
+    pucl_constraint_update,
     trajectory_cost,
 )
 from src.models.model_loader import load_model_and_tokenizer  # noqa: E402
@@ -231,35 +232,27 @@ def main() -> int:
     labels = [r["label"] for r in ev]
     is_ho = [r["scenario"] in held_out for r in ev]
 
-    for name, selection, frac in (
-        ("maxent_all_negatives", "all", 1.0),
-        ("maxent_pucl", "pucl", 0.5),
-    ):
-        torch.manual_seed(0)
-        head = StepFeasibilityHead(dim).to(device)
-        cfg = MaxEntConstraintConfig(
-            n_steps=a.steps, negative_selection=selection, pucl_keep_fraction=frac
-        )
-        stats = maxent_constraint_update(head, e_batch, n_batch, cfg)
+    def report_variant(name, head, extra=None):
         with torch.no_grad():
             cost = trajectory_cost(head, v_batch.to(device)).cpu().tolist()
             cost_norm = (
                 trajectory_cost(head, v_batch.to(device), normalise_by_length=True)
-                .cpu()
-                .tolist()
+                .cpu().tolist()
             )
+        # precision at the operating point the loop would use: flag the same
+        # share of traces the supervised head flags, so the comparison is fair
+        order = sorted(range(len(cost)), key=lambda i: -cost[i])
+        k = int(round(0.46 * len(cost)))
+        flagged = set(order[:k])
+        tp = sum(labels[i] for i in flagged)
         block = {
-            "train_stats": stats,
             "auroc_cost": auroc(cost, labels),
             "auroc_cost_per_step": auroc(cost_norm, labels),
             "auroc_held_out": auroc(
-                [c for c, h in zip(cost, is_ho) if h],
-                [y for y, h in zip(labels, is_ho) if h],
+                [c for c, h in zip(cost, is_ho) if h], [y for y, h in zip(labels, is_ho) if h]
             ),
-            "auroc_trained_scen": auroc(
-                [c for c, h in zip(cost, is_ho) if not h],
-                [y for y, h in zip(labels, is_ho) if not h],
-            ),
+            "precision_at_46pct_flagged": tp / max(1, k),
+            "recall_at_46pct_flagged": tp / max(1, sum(labels)),
             "per_arm": {
                 arm: auroc(
                     [c for c, r in zip(cost, ev) if r["arm"] == arm],
@@ -267,14 +260,38 @@ def main() -> int:
                 )
                 for arm in ARMS
             },
+            **(extra or {}),
         }
         report["variants"][name] = block
         print(
-            f"{name:22} AUROC cost {block['auroc_cost']:.3f} | per-step {block['auroc_cost_per_step']:.3f} "
-            f"| held-out {block['auroc_held_out']} | trained {block['auroc_trained_scen']} "
-            f"| per arm { {k: (round(v, 2) if v else None) for k, v in block['per_arm'].items()} }",
+            f"{name:22} AUROC {block['auroc_cost']:.3f} | per-step {block['auroc_cost_per_step']:.3f} "
+            f"| held-out {block['auroc_held_out']:.3f} "
+            f"| at 46% flagged: precision {100*block['precision_at_46pct_flagged']:.0f}% "
+            f"recall {100*block['recall_at_46pct_flagged']:.0f}%",
             flush=True,
         )
+
+    for name, selection, frac in (
+        ("maxent_all_negatives", "all", 1.0),
+        ("maxent_score_selected", "pucl", 0.5),
+    ):
+        torch.manual_seed(0)
+        head = StepFeasibilityHead(dim).to(device)
+        cfg = MaxEntConstraintConfig(
+            n_steps=a.steps, negative_selection=selection, pucl_keep_fraction=frac
+        )
+        stats = maxent_constraint_update(head, e_batch, n_batch, cfg)
+        report_variant(name, head, {"train_stats": stats})
+
+    # the published two-step method: distance-selected reliable negatives
+    for frac in (0.2, 0.3, 0.5):
+        torch.manual_seed(0)
+        head = StepFeasibilityHead(dim).to(device)
+        cfg = MaxEntConstraintConfig(
+            n_steps=max(a.steps, 400), lr=1e-3, pucl_keep_fraction=frac, pucl_k=2
+        )
+        stats, _mem = pucl_constraint_update(head, e_batch, n_batch, cfg)
+        report_variant(f"pucl_keep{frac}", head, {"train_stats": stats})
 
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(report, indent=2))
