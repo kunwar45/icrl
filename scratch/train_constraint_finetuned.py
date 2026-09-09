@@ -222,6 +222,10 @@ def train_one(freeze: bool, a, train_rows, eval_rows, held_out, device) -> dict:
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     enc = AutoModel.from_pretrained(a.encoder, dtype=torch.bfloat16)
+    if not freeze and a.grad_checkpointing:
+        # activations at 4096 tokens are what blew up on an L40S (job 5321542)
+        enc.gradient_checkpointing_enable()
+        enc.enable_input_require_grads()
     if freeze:
         for p in enc.parameters():
             p.requires_grad_(False)
@@ -290,16 +294,20 @@ def train_one(freeze: bool, a, train_rows, eval_rows, held_out, device) -> dict:
                 padding=True,
             ).to(device)
             y = torch.tensor([float(tr[j][target_key]) for j in idx], device=device)
-            loss = lossf(model(**enc_in), y)
+            loss = lossf(model(**enc_in), y) / a.grad_accum
             loss.backward()
-            nn.utils.clip_grad_norm_(
-                [p for p in model.parameters() if p.requires_grad], 1.0
-            )
-            opt.step()
-            opt.zero_grad()
             step += 1
+            if step % a.grad_accum == 0:
+                nn.utils.clip_grad_norm_(
+                    [p for p in model.parameters() if p.requires_grad], 1.0
+                )
+                opt.step()
+                opt.zero_grad()
             if step % 25 == 0:
-                print(f"   epoch {epoch} step {step} loss {float(loss):.4f}", flush=True)
+                print(
+                    f"   epoch {epoch} step {step} loss {float(loss) * a.grad_accum:.4f}",
+                    flush=True,
+                )
         v = score_all(model, tok, va, a.max_length, a.eval_batch, device)
         vauc = auroc(v, [r["label"] for r in va]) or 0.0
         print(f"   epoch {epoch}: validation AUROC {vauc:.3f}", flush=True)
@@ -346,6 +354,8 @@ def main() -> int:
     ap.add_argument("--with-observations", action="store_true")
     ap.add_argument("--obs-chars", type=int, default=400)
     ap.add_argument("--skip-frozen", action="store_true")
+    ap.add_argument("--grad-accum", type=int, default=4)
+    ap.add_argument("--grad-checkpointing", action="store_true", default=True)
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
 
