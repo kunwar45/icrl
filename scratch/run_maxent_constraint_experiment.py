@@ -245,7 +245,12 @@ def main() -> int:
         k = int(round(0.46 * len(cost)))
         flagged = set(order[:k])
         tp = sum(labels[i] for i in flagged)
+        fp = k - tp
+        fn = sum(labels) - tp
+        tn = len(cost) - tp - fp - fn
         block = {
+            "confusion_at_46pct": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
+            "accuracy_at_46pct": (tp + tn) / len(cost),
             "auroc_cost": auroc(cost, labels),
             "auroc_cost_per_step": auroc(cost_norm, labels),
             "auroc_held_out": auroc(
@@ -267,7 +272,8 @@ def main() -> int:
             f"{name:22} AUROC {block['auroc_cost']:.3f} | per-step {block['auroc_cost_per_step']:.3f} "
             f"| held-out {block['auroc_held_out']:.3f} "
             f"| at 46% flagged: precision {100*block['precision_at_46pct_flagged']:.0f}% "
-            f"recall {100*block['recall_at_46pct_flagged']:.0f}%",
+            f"recall {100*block['recall_at_46pct_flagged']:.0f}% acc {100*block['accuracy_at_46pct']:.0f}% "
+            f"| TP {tp} FP {fp} FN {fn} TN {tn}",
             flush=True,
         )
 
@@ -292,6 +298,22 @@ def main() -> int:
         )
         stats, _mem = pucl_constraint_update(head, e_batch, n_batch, cfg)
         report_variant(f"pucl_keep{frac}", head, {"train_stats": stats})
+
+    # Control: supervised cross-entropy on the same per-step features, using the
+    # audited labels. If this lands near the unsupervised variants, the frozen
+    # representation is the ceiling and no objective on top of it will help.
+    torch.manual_seed(0)
+    head = StepFeasibilityHead(dim).to(device)
+    opt = torch.optim.AdamW(head.parameters(), lr=1e-3, weight_decay=0.01)
+    pos, neg = e_batch.embeddings.to(device), n_batch.embeddings.to(device)
+    for _ in range(max(a.steps, 400)):
+        pi = torch.randint(0, pos.shape[0], (256,), device=device)
+        ni = torch.randint(0, neg.shape[0], (256,), device=device)
+        zp = head(pos[pi]).clamp(1e-6, 1 - 1e-6)
+        zn = head(neg[ni]).clamp(1e-6, 1 - 1e-6)
+        loss = -(torch.log(zp).mean() + torch.log(1 - zn).mean())
+        opt.zero_grad(); loss.backward(); opt.step()
+    report_variant("supervised_same_features", head, {"note": "all nominal steps as negatives, with labels"})
 
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(report, indent=2))
