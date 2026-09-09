@@ -144,3 +144,52 @@ def test_subset_renumbers_owners_consistently():
     assert s.n_trajectories == 2
     assert s.embeddings.shape[0] == 3
     assert sorted(set(s.owner.tolist())) == [0, 1]
+
+
+def test_pucl_distance_rule_finds_the_violating_steps_without_a_trained_head():
+    """PUCL's step 1 uses distance to the demonstrations, not the model's own
+    scores, so it works before the head has learned anything. That is the whole
+    point: selecting negatives with an untrained head bootstraps from noise."""
+    from src.icrl_dual_training.maxent_constraint import reliable_infeasible_steps
+
+    torch.manual_seed(0)
+    expert, violating = separable_pools(n=20, seed=1)
+    clean_like, _ = separable_pools(n=20, seed=2)
+    mixed = TrajectoryBatch(
+        embeddings=torch.cat([clean_like.embeddings, violating.embeddings]),
+        owner=torch.cat([clean_like.owner, violating.owner + clean_like.n_trajectories]),
+        n_trajectories=clean_like.n_trajectories + violating.n_trajectories,
+    )
+    n_clean_steps = clean_like.embeddings.shape[0]
+    idx = reliable_infeasible_steps(expert, mixed, percentile=0.4, k=2, expand=False)
+    from_violating = (idx >= n_clean_steps).float().mean()
+    # the distance rule has no trained model to lean on, so a few clean steps
+    # that sit far from the demonstrations do get picked up
+    assert from_violating > 0.9, from_violating
+
+
+def test_pucl_update_separates_expert_from_reliable_negatives():
+    from src.icrl_dual_training.maxent_constraint import pucl_constraint_update
+
+    torch.manual_seed(0)
+    head = StepFeasibilityHead(DIM)
+    expert, nominal = separable_pools(n=24)
+    # the step-level cross-entropy needs a larger step size than the
+    # trajectory-level maxent update the default is set for
+    cfg = MaxEntConstraintConfig(n_steps=200, lr=1e-3, pucl_keep_fraction=0.5)
+    stats, memory = pucl_constraint_update(head, expert, nominal, cfg)
+    assert stats["mean_phi_expert"] > 0.8
+    assert stats["mean_phi_reliable_negative"] < 0.2
+    assert memory.shape[0] == stats["n_reliable_negative_steps"]
+
+
+def test_pucl_memory_buffer_is_carried_into_the_next_round():
+    from src.icrl_dual_training.maxent_constraint import pucl_constraint_update
+
+    torch.manual_seed(0)
+    head = StepFeasibilityHead(DIM)
+    expert, nominal = separable_pools(n=16)
+    cfg = MaxEntConstraintConfig(n_steps=20, pucl_keep_fraction=0.5)
+    _, memory = pucl_constraint_update(head, expert, nominal, cfg)
+    stats2, _ = pucl_constraint_update(head, expert, nominal, cfg, memory=memory)
+    assert stats2["n_memory_steps"] == memory.shape[0]

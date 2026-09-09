@@ -201,6 +201,10 @@ class MaxEntConstraintConfig:
     """'all' for the plain Malik update, 'pucl' to keep only reliable negatives."""
     pucl_keep_fraction: float = 0.5
     """Share of the nominal pool used as negatives when negative_selection='pucl'."""
+    pucl_k: int = 2
+    """Neighbours in the PUCL distance rule; the paper recommends 1-3."""
+    batch_steps: int = 256
+    """Batch size for the step-level PUCL loss."""
     lr: float = 1e-4
     weight_decay: float = 0.01
     n_steps: int = 200
@@ -313,3 +317,143 @@ def step_feasibility_report(
     k = min(top_k, phi.numel())
     vals, idx = torch.topk(-phi, k)
     return [(int(i), float(-v)) for v, i in zip(vals, idx)]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Positive-Unlabelled Constraint Learning (Peng and Billard, IEEE RA-L 2024,
+# arXiv:2408.01622), the two-step method the ICRL survey names as the answer to
+# a constraint that "mistakenly classifies demonstrations as infeasible".
+#
+# Our situation is exactly the one it was written for. The plain expert-minus-
+# policy update of Malik et al. treats every policy rollout as infeasible, but
+# our policy is already clean on roughly four fifths of its rollouts, so that
+# term fights the expert term and the resulting constraint over-flags: on 625
+# judged traces its positive label is 37% pure and its precision ceiling is 52%.
+#
+# PUCL instead calls the policy's rollouts UNLABELLED. Step 1 picks out the
+# subset that is reliably infeasible using a distance rule in feature space --
+# not the model's own scores, which would bootstrap from noise. Step 2 fits the
+# feasibility classifier by ordinary cross-entropy on the demonstrations against
+# only that subset, plus a memory buffer of negatives confirmed in earlier
+# rounds.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def standardise_together(
+    expert: torch.Tensor, nominal: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Zero-mean, unit-variance over the merged sets (PUCL Sec. III-B).
+
+    The distance rule needs comparable dimensions; the paper standardises the
+    combined data before scoring because the features are heterogeneous.
+    """
+    both = torch.cat([expert, nominal], dim=0)
+    mu, sd = both.mean(0, keepdim=True), both.std(0, keepdim=True).clamp(min=1e-6)
+    return (expert - mu) / sd, (nominal - mu) / sd
+
+
+def knn_distance_to_demonstrations(
+    expert_steps: torch.Tensor, nominal_steps: torch.Tensor, k: int = 2, chunk: int = 2048
+) -> torch.Tensor:
+    """PUCL Eq. 2: mean distance from each unlabelled step to its k nearest
+    demonstration steps. A step far from everything the expert ever did is the
+    one that is plausibly infeasible."""
+    out = []
+    kk = min(k, expert_steps.shape[0])
+    for i in range(0, nominal_steps.shape[0], chunk):
+        d = torch.cdist(nominal_steps[i : i + chunk], expert_steps)
+        out.append(d.topk(kk, dim=1, largest=False).values.mean(dim=1))
+    return torch.cat(out)
+
+
+def reliable_infeasible_steps(
+    expert: TrajectoryBatch,
+    nominal: TrajectoryBatch,
+    percentile: float = 0.3,
+    k: int = 2,
+    expand: bool = True,
+) -> torch.Tensor:
+    """PUCL Eqs. 2-4: indices of the nominal STEPS that are reliably infeasible.
+
+    `percentile` is the share of the unlabelled pool kept, which the paper calls
+    the user's belief about the size of the true infeasible region: lower keeps
+    more and yields a more conservative constraint. `expand` adds, from every
+    policy trajectory, the step closest to the selected set, which the paper
+    includes because a demonstration hugging the true boundary otherwise leaves
+    a gap between the learned and the true one.
+    """
+    e_std, n_std = standardise_together(expert.embeddings, nominal.embeddings)
+    scores = knn_distance_to_demonstrations(e_std, n_std, k=k)
+    n_keep = max(1, int(round(percentile * scores.numel())))
+    idx = torch.topk(scores, n_keep).indices
+    if not expand or idx.numel() == 0:
+        return idx
+    # Eq. 4: one extra step per trajectory, the one nearest the selected set
+    keep = torch.zeros(scores.numel(), dtype=torch.bool, device=scores.device)
+    keep[idx] = True
+    rel = n_std[idx]
+    extra = []
+    for t in range(nominal.n_trajectories):
+        rows = (nominal.owner == t).nonzero(as_tuple=True)[0]
+        rows = rows[~keep[rows]]
+        if rows.numel() == 0:
+            continue
+        d = torch.cdist(n_std[rows], rel).min(dim=1).values
+        extra.append(rows[int(d.argmin())])
+    if extra:
+        idx = torch.cat([idx, torch.stack(extra)])
+    return torch.unique(idx)
+
+
+def pucl_constraint_update(
+    head: StepFeasibilityHead,
+    expert: TrajectoryBatch,
+    nominal: TrajectoryBatch,
+    cfg: MaxEntConstraintConfig,
+    memory: torch.Tensor | None = None,
+    optimizer: torch.optim.Optimizer | None = None,
+) -> tuple[dict, torch.Tensor]:
+    """PUCL Eq. 5: cross-entropy on demonstrations against reliable negatives.
+
+    Returns the training statistics and the memory buffer of reliable-infeasible
+    step embeddings, to be carried into the next round as the paper prescribes.
+    """
+    device = next(head.parameters()).device
+    expert, nominal = expert.to(device), nominal.to(device)
+    opt = optimizer or torch.optim.AdamW(
+        head.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay
+    )
+    idx = reliable_infeasible_steps(
+        expert, nominal, percentile=cfg.pucl_keep_fraction, k=cfg.pucl_k
+    )
+    neg = nominal.embeddings[idx]
+    if memory is not None and memory.numel():
+        neg = torch.cat([neg, memory.to(device)])
+    pos = expert.embeddings
+
+    for step in range(cfg.n_steps):
+        p_idx = torch.randint(0, pos.shape[0], (min(cfg.batch_steps, pos.shape[0]),))
+        n_idx = torch.randint(0, neg.shape[0], (min(cfg.batch_steps, neg.shape[0]),))
+        # zeta = feasibility, so demonstrations are pushed to 1 and reliable
+        # negatives to 0; identical in form to the supervised loss, but the
+        # negative set is a selected subset rather than everything the policy did
+        zp = head(pos[p_idx.to(device)]).clamp(1e-6, 1 - 1e-6)
+        zn = head(neg[n_idx.to(device)]).clamp(1e-6, 1 - 1e-6)
+        loss = -(torch.log(zp).mean() + torch.log(1 - zn).mean())
+        opt.zero_grad()
+        loss.backward()
+        if cfg.grad_clip:
+            nn.utils.clip_grad_norm_(head.parameters(), cfg.grad_clip)
+        opt.step()
+
+    with torch.no_grad():
+        stats = {
+            "loss": float(loss),
+            "n_expert_steps": int(pos.shape[0]),
+            "n_unlabelled_steps": int(nominal.embeddings.shape[0]),
+            "n_reliable_negative_steps": int(idx.numel()),
+            "n_memory_steps": 0 if memory is None else int(memory.shape[0]),
+            "mean_phi_expert": float(head(pos).mean()),
+            "mean_phi_reliable_negative": float(head(neg).mean()),
+        }
+    return stats, nominal.embeddings[idx].detach().cpu()
