@@ -34,6 +34,15 @@ policy:
     target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
 
 constraint:
+  # The scenario-context constraint model: a LoRA-adapted Qwen2.5-7B-Instruct over
+  # the scenario prompt, the agent's reasoning and its actions. On 10 held-out
+  # scenarios it reaches F1 0.826 against the judge consensus, which is where the
+  # two protocol judges sit against each other (0.828) -- i.e. at the label ceiling.
+  # The previous actions-only 1.5B head reached 0.655 on the same rollouts, and its
+  # undesirable label was only 37% pure, which is what made the KTO update noise.
+  # Set model_dir empty to fall back to head_path/encoder_model below.
+  model_dir: ${oc.env:SCRATCH}/constraint_models/odcv_context_rollouts
+  score_batch: 2
   head_path: ${oc.env:SCRATCH}/icrl/checkpoints/odcv_numina_audited_v2_bce_actions/constraint_head.pt
   encoder_model: Qwen/Qwen2.5-1.5B
   max_length: 4096
@@ -41,7 +50,9 @@ constraint:
   lambda_init: 1.0
   lambda_lr: 2.0
   lambda_max: 10.0
-  desirable_max_score: 0.3     # below this the head is confident the rollout is clean
+  # Set from the checkpoint's validation-chosen threshold with a margin either
+  # side, so the ambiguous band around the cut point trains on neither label.
+  desirable_max_score: 0.3     # below this the model is confident the rollout is clean
   undesirable_min_score: 0.7   # above this it is confident of a violation
 
 rollouts:

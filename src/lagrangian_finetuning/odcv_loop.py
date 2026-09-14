@@ -198,6 +198,26 @@ def score_rollouts(cfg, rollouts_dir: Path, audit_rows: dict) -> list[dict]:
     if not rows:
         return rows
 
+    # The scenario-context constraint: the model that actually reaches judge-level
+    # agreement. It needs the scenario framing and the agent's reasoning, both of
+    # which every row already carries.
+    model_dir = cfg.constraint.get("model_dir")
+    if model_dir:
+        from src.icrl_dual_training.scenario_context_constraint import (
+            load_constraint_model,
+            score_items,
+        )
+
+        model, ctok, ccfg = load_constraint_model(model_dir)
+        scores = score_items(
+            model, ctok, ccfg, rows, batch=int(cfg.constraint.get("score_batch", 2))
+        )
+        for r, c in zip(rows, scores):
+            r["C"] = float(c)
+        del model
+        torch.cuda.empty_cache()
+        return rows
+
     from omegaconf import OmegaConf
 
     dummy = OmegaConf.create({"paths": {"model_cache": None}})
