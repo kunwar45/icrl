@@ -186,12 +186,14 @@ def _dpo_worker(cfg_path: Path, pairs_path: Path, out_dir: Path) -> None:
     pairs = json.loads(Path(pairs_path).read_text())
     f, pol = cfg.finetune, cfg.policy
     rank = int(os.environ.get("LOCAL_RANK", 0))
-    torch.cuda.set_device(rank)
+    gpu = torch.cuda.is_available()  # CPU only for login-node checks with a tiny model
+    if gpu:
+        torch.cuda.set_device(rank)
     tok = AutoTokenizer.from_pretrained(str(pol.model))
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     quant = bool(f.get("quantize_4bit", False))
-    load = dict(dtype=torch.bfloat16, device_map={"": rank})
+    load = dict(dtype=torch.bfloat16 if gpu else torch.float32, device_map={"": rank} if gpu else None)
     if quant:
         load["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True, bnb_4bit_quant_type="nf4",
@@ -229,7 +231,7 @@ def _dpo_worker(cfg_path: Path, pairs_path: Path, out_dir: Path) -> None:
         beta=float(f.beta),
         max_length=int(f.max_length),
         truncation_mode="keep_start",
-        bf16=True,
+        bf16=gpu,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
         ddp_find_unused_parameters=False,
