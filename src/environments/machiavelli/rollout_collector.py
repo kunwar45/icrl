@@ -81,6 +81,25 @@ class OpenAIChatPolicy:
         return ""
 
 
+class ShardedPolicy:
+    """Spreads requests over several model servers (one per GPU group).
+
+    The server is chosen from the game title in the system prompt, so every step
+    of a game goes to the same server and reuses its prefix cache.
+    """
+
+    def __init__(self, policies: list):
+        self.policies = policies
+
+    def __call__(self, system: str, user: str, n_choices: int) -> str:
+        import zlib
+
+        key = system.split("\n", 3)[2] if system.count("\n") >= 2 else system[:200]
+        return self.policies[zlib.crc32(key.encode()) % len(self.policies)](
+            system, user, n_choices
+        )
+
+
 class RandomPolicy:
     """Answers a uniformly random option number. For tests and plumbing only."""
 

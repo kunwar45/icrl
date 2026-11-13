@@ -95,6 +95,8 @@ class VllmServer:
                 str(self.max_lora_rank),
             ]
         env = dict(os.environ)
+        # fir's vLLM build lacks flashinfer; its sampler import is the only hard dependency
+        env.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
         if self.gpus:
             env["CUDA_VISIBLE_DEVICES"] = self.gpus
         self.log_path.parent.mkdir(parents=True, exist_ok=True)

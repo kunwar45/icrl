@@ -1,4 +1,4 @@
-# ABOUTME: The MACHIAVELLI ICRL run with a Qwen2.5-32B-Instruct policy: same method and games as machiavelli_constrained_dpo.yaml, sized for 4 H100s
+# ABOUTME: The MACHIAVELLI ICRL run with a Qwen2.5-32B-Instruct policy: same method and games as machiavelli_constrained_dpo.yaml, sized for 4 H100s and a few hours
 # ABOUTME: Run: CONFIG=configs/lagrangian_finetuning/machiavelli_constrained_dpo_qwen32b.yaml with --gres=gpu:h100:4 on scripts/slurm/run_machiavelli_icrl_pipeline_job.sh
 run_name: machiavelli_constrained_dpo_qwen32b_v1
 
@@ -19,7 +19,7 @@ games:
 policy:
   model: Qwen/Qwen2.5-32B-Instruct
   serve:
-    gpus: "0,1"
+    replicas: ["0,1", "2,3"]   # two vLLM servers, tensor-parallel over 2 GPUs each
     tensor_parallel: 2
     max_model_len: 8192
     max_num_seqs: 64
@@ -29,7 +29,7 @@ policy:
 
 rollouts:
   max_steps: 50              # decisions per episode before truncation
-  workers: 64                # concurrent episodes (threads) against the server
+  workers: 128               # concurrent episodes (threads) across the servers
   temperature: 0.7           # demos and training rollouts
   demo_seeds: [0, 1, 2, 3]   # per game, per prompt kind
   round_seeds: [10, 11, 12, 13]
@@ -39,7 +39,7 @@ rollouts:
 
 constraint:
   encoder_model: Qwen/Qwen2.5-1.5B
-  device: cuda:2             # vLLM holds GPUs 0-1; DPO spreads over the node after vLLM stops
+  device: cuda:0             # loaded only while no vLLM server is up
   max_length: 768
   scene_chars: 2000
   head_hidden: 256
@@ -55,14 +55,14 @@ constraint:
   seed: 0
 
 finetune:
-  rounds: 3
+  rounds: 2                  # speed: 2 rounds, not 3
   lambda_init: 1.0
   lambda_lr: 4.0
   lambda_max: 10.0
   epsilon: 0.15              # budget on mean C_theta of the actions the policy takes
   reward_scale: 2.0          # centred per-option return, in % of the game's max points, per unit of S
   pair_margin: 0.3           # minimum S gap between chosen and rejected
-  max_pairs_per_round: 800   # 32B DPO is ~4x slower than 7B; keeps 3 rounds inside the job
+  max_pairs_per_round: 600   # speed: keeps each DPO round to minutes on 4 GPUs
   lora_r: 16
   lora_alpha: 32
   lora_dropout: 0.05
@@ -72,8 +72,9 @@ finetune:
   lr: 1.0e-5
   epochs: 1
   per_device_batch: 2
-  grad_accum: 8
-  device_map: auto           # 65 GB of bf16 weights, spread over the node's GPUs
+  grad_accum: 2
+  dpo_gpus: "0,1,2,3"        # data-parallel DPO, one process per GPU
+  quantize_4bit: true        # a 4-bit 32B copy per GPU (QLoRA)
   max_length: 4096
   seed: 0
 
