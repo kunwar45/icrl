@@ -168,3 +168,34 @@ def test_random_policy_episode_records_ground_truth():
         assert len(s["option_returns"]) == len(s["choices"])
     m = episode_metrics([e])
     assert 0.0 <= m["violation_rate"] <= 1.0
+
+
+def test_step_constraint_load_passes_device(tmp_path, monkeypatch):
+    import json as _json
+
+    import torch
+
+    from src.icrl_dual_training.machiavelli_step_constraint import StepConstraint
+
+    head = torch.nn.Sequential(torch.nn.Linear(4, 2), torch.nn.GELU(), torch.nn.Linear(2, 1), torch.nn.Sigmoid())
+    torch.save(head.state_dict(), tmp_path / "constraint_head.pt")
+    (tmp_path / "constraint_meta.json").write_text(
+        _json.dumps({"encoder_model": "fake", "max_length": 8, "head_hidden": 2})
+    )
+    seen = {}
+
+    class FakeEncoder:
+        def __init__(self):
+            self.head = torch.nn.Sequential(
+                torch.nn.Linear(4, 2), torch.nn.GELU(), torch.nn.Linear(2, 1), torch.nn.Sigmoid()
+            )
+            self.backbone = torch.nn.Linear(1, 1)
+
+    def fake_build(cls, encoder_model, max_length, head_hidden, device=None):
+        seen["device"] = device
+        return cls(FakeEncoder())
+
+    monkeypatch.setattr(StepConstraint, "build", classmethod(fake_build))
+    obj = StepConstraint.load(tmp_path, device="cpu")
+    assert seen["device"] == "cpu"
+    assert torch.equal(obj.encoder.head[0].weight, head[0].weight)

@@ -45,7 +45,12 @@ def demo_steps(
 ) -> tuple[list[dict], list[dict]]:
     def rows(eps, accept):
         return [
-            {"game": e["game"], "text": constraint_text(s["scene"], s["choices"][s["action"]], scene_chars)}
+            {
+                "game": e["game"],
+                "text": constraint_text(
+                    s["scene"], s["choices"][s["action"]], scene_chars
+                ),
+            }
             for e in eps
             for s in e["steps"]
             if accept(s)
@@ -115,25 +120,36 @@ class StepConstraint:
         self.encoder = encoder
 
     @classmethod
-    def build(cls, encoder_model: str, max_length: int, head_hidden: int, device: str | None = None):
+    def build(
+        cls,
+        encoder_model: str,
+        max_length: int,
+        head_hidden: int,
+        device: str | None = None,
+    ):
         import torch
 
         from src.trajectory_embedding.trajectory_encoder import load_qwen_encoder
 
         if device is None:
             device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        enc = load_qwen_encoder(encoder_model, max_length=max_length, head_hidden=head_hidden, device=device)
+        enc = load_qwen_encoder(
+            encoder_model, max_length=max_length, head_hidden=head_hidden, device=device
+        )
         enc.text_mode = "machiavelli_step"
         enc.head.to(next(enc.backbone.parameters()).device)
         return cls(enc)
 
     @classmethod
-    def load(cls, out_dir: Path, encoder_model: str | None = None):
+    def load(
+        cls, out_dir: Path, encoder_model: str | None = None, device: str | None = None
+    ):
         meta = json.loads((Path(out_dir) / "constraint_meta.json").read_text())
         obj = cls.build(
             encoder_model or meta["encoder_model"],
             meta["max_length"],
             meta["head_hidden"],
+            device=device,
         )
         import torch
 
@@ -169,7 +185,10 @@ def train_step_constraint(
 
     c = cfg.constraint
     model = StepConstraint.build(
-        str(c.encoder_model), int(c.max_length), int(c.head_hidden), device=c.get("device")
+        str(c.encoder_model),
+        int(c.max_length),
+        int(c.head_hidden),
+        device=c.get("device"),
     )
     rng = random.Random(int(c.seed))
     cap = int(c.max_demos_per_class)

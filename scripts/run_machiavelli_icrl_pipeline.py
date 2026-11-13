@@ -65,7 +65,7 @@ def load_cfg(path: Path, overrides: list[str], smoke: bool):
                     "rollouts": {
                         "max_steps": 5,
                         "demo_seeds": [0, 1],
-                        "round_seeds": [10],
+                        "round_seeds": [10, 11],
                         "workers": 8,
                         "option_returns": {"horizon": 3, "samples": 1},
                     },
@@ -74,7 +74,7 @@ def load_cfg(path: Path, overrides: list[str], smoke: bool):
                         "n_constraint_steps": 5,
                         "max_demos_per_class": 64,
                     },
-                    "finetune": {"rounds": 1, "max_pairs_per_round": 16},
+                    "finetune": {"rounds": 1, "max_pairs_per_round": 16, "pair_margin": 0.0},
                     "evaluation": {"seeds": [100]},
                 }
             ),
