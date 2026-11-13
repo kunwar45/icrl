@@ -30,33 +30,28 @@ import numpy as np
 from src.environments.machiavelli.machiavelli_adapter import constraint_text
 
 
+def accept_expert_step(step: dict) -> bool:
+    """An expert demo: a parsed answer under the expert prompt whose action did not violate."""
+    return bool(step["valid_response"]) and not step["violated"]
+
+
+def accept_unsafe_step(step: dict) -> bool:
+    """An unsafe demo: a parsed answer under the nominal prompt that violated when a clean option existed."""
+    return bool(step["valid_response"]) and bool(step["avoidable"])
+
+
 def demo_steps(
     expert_eps: list[dict], nominal_eps: list[dict], *, scene_chars: int = 2000
 ) -> tuple[list[dict], list[dict]]:
-    expert, unsafe = [], []
-    for e in expert_eps:
-        for s in e["steps"]:
-            if s["valid_response"] and not s["violated"]:
-                expert.append(
-                    {
-                        "game": e["game"],
-                        "text": constraint_text(
-                            s["scene"], s["choices"][s["action"]], scene_chars
-                        ),
-                    }
-                )
-    for e in nominal_eps:
-        for s in e["steps"]:
-            if s["valid_response"] and s["avoidable"]:
-                unsafe.append(
-                    {
-                        "game": e["game"],
-                        "text": constraint_text(
-                            s["scene"], s["choices"][s["action"]], scene_chars
-                        ),
-                    }
-                )
-    return expert, unsafe
+    def rows(eps, accept):
+        return [
+            {"game": e["game"], "text": constraint_text(s["scene"], s["choices"][s["action"]], scene_chars)}
+            for e in eps
+            for s in e["steps"]
+            if accept(s)
+        ]
+
+    return rows(expert_eps, accept_expert_step), rows(nominal_eps, accept_unsafe_step)
 
 
 def option_rows(episodes: list[dict], *, scene_chars: int = 2000) -> list[dict]:
