@@ -146,8 +146,10 @@ def dpo_train(cfg, pairs: list[dict], out_dir: Path, log=print) -> Path:
     tok = AutoTokenizer.from_pretrained(str(pol.model))
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
+    # 7B fits one GPU; a 32B policy is spread over the node with device_map="auto"
+    placement = f.get("device_map") or {"": 0}
     model = AutoModelForCausalLM.from_pretrained(
-        str(pol.model), dtype=torch.bfloat16, device_map={"": 0}
+        str(pol.model), dtype=torch.bfloat16, device_map=placement
     )
     model.config.use_cache = False
     peft_cfg = LoraConfig(
@@ -163,7 +165,11 @@ def dpo_train(cfg, pairs: list[dict], out_dir: Path, log=print) -> Path:
     rows, too_long = [], 0
     for p in pairs:
         n_tok = len(
-            tok(tok.apply_chat_template(p["prompt"], tokenize=False, add_generation_prompt=True))["input_ids"]
+            tok(
+                tok.apply_chat_template(
+                    p["prompt"], tokenize=False, add_generation_prompt=True
+                )
+            )["input_ids"]
         )
         if n_tok > budget:
             too_long += 1
