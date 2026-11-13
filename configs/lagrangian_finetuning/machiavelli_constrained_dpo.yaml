@@ -1,0 +1,84 @@
+# ABOUTME: End-to-end ICRL run on MACHIAVELLI: expert + unsafe demos from one model, step-level constraint C_theta, Lagrangian DPO fine-tuning, held-out evaluation of ground-truth violations
+# ABOUTME: Run: sbatch ... scripts/slurm/run_machiavelli_icrl_pipeline_job.sh (CONFIG defaults to this file); locally: python scripts/run_machiavelli_icrl_pipeline.py --config <this> --smoke
+run_name: machiavelli_constrained_dpo_v1
+
+machiavelli_root: ${oc.env:MACHIAVELLI_ROOT}
+
+games:
+  # The benchmark's 30 test games (machiavelli/config.py: games_test), sorted.
+  # The first 20 train the constraint and the policy; the last 10 are held out
+  # and appear only in evaluation.
+  train: [avatar-of-the-wolf, battlemage, cliffhanger, death-collector, fate-of-the-storm-gods,
+          hero-of-kendrickstone, hero-project-open-season, hero-project-redemption-season, heroes-of-myth,
+          hollywood-visionary, i-cyborg, kidnapped, kung-fu, luminous-underground, metahuman-inc,
+          midsummer-nights-choice, mysteries-of-baroque, pendragon-rising, ratings-war, sea-eternal]
+  heldout: [seventh-sea-a-pirates-pact, slammed, t-rex-time-machine, tower-behind-the-moon,
+            trials-of-the-thief-taker, undercover-agent, vampire-the-masquerade_parliament-of-knives,
+            versus-deathscapes, versus-the-lost-ones, werewolves-haven-rising]
+
+policy:
+  model: Qwen/Qwen2.5-7B-Instruct
+  serve:
+    gpus: "0"
+    tensor_parallel: 1
+    max_model_len: 8192
+    max_num_seqs: 64
+    gpu_fraction: 0.85
+    reasoning_parser: null     # Qwen2.5 has no <think> block
+    tool_call_parser: null
+
+rollouts:
+  max_steps: 50              # decisions per episode before truncation
+  workers: 64                # concurrent episodes (threads) against the server
+  temperature: 0.7           # demos and training rollouts
+  demo_seeds: [0, 1, 2, 3]   # per game, per prompt kind
+  round_seeds: [10, 11, 12, 13]
+  option_returns:            # Monte-Carlo reward estimate per option, from the game engine
+    horizon: 10
+    samples: 2
+
+constraint:
+  encoder_model: Qwen/Qwen2.5-1.5B
+  device: cuda:1             # vLLM holds GPU 0; DPO trains on GPU 0 after vLLM stops
+  max_length: 768
+  scene_chars: 2000
+  head_hidden: 256
+  loss: bce                  # the ODCV-selected objective (constraint_trainer.constraint_update)
+  beta: 0.8                  # used by the icrl/hinge losses only
+  lambda_c: 1.0
+  n_iterations: 20
+  n_constraint_steps: 50
+  batch_size: 16
+  lr: 1.0e-4
+  weight_decay: 0.01
+  max_demos_per_class: 4000
+  seed: 0
+
+finetune:
+  rounds: 3
+  lambda_init: 1.0
+  lambda_lr: 4.0
+  lambda_max: 10.0
+  epsilon: 0.15              # budget on mean C_theta of the actions the policy takes
+  reward_scale: 2.0          # centred per-option return, in % of the game's max points, per unit of S
+  pair_margin: 0.3           # minimum S gap between chosen and rejected
+  max_pairs_per_round: 1500
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  lora_target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  beta: 0.1
+  rpo_alpha: 0.5             # NLL on the chosen answer, against likelihood collapse
+  lr: 1.0e-5
+  epochs: 1
+  per_device_batch: 4
+  grad_accum: 4
+  max_length: 3072
+  seed: 0
+
+evaluation:
+  temperature: 0.2           # the benchmark LM agent's sampling temperature
+  seeds: [100, 101, 102, 103]
+
+output:
+  dir: ${oc.env:SCRATCH}/icrl/machiavelli/${run_name}

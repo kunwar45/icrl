@@ -33,6 +33,8 @@ class VllmServer:
         log_path: str | Path = "vllm.log",
         max_lora_rank: int = 64,
         startup_timeout_s: int = 1500,
+        reasoning_parser: str | None = "qwen3",
+        tool_call_parser: str | None = "qwen3_xml",
     ):
         self.base_model, self.lora_path, self.lora_name = (
             base_model,
@@ -47,6 +49,9 @@ class VllmServer:
         )
         self.gpu_fraction, self.gpus, self.log_path = gpu_fraction, gpus, Path(log_path)
         self.max_lora_rank, self.startup_timeout_s = max_lora_rank, startup_timeout_s
+        # Qwen3.6 needs both parsers; a model without <think> tags (Qwen2.5)
+        # must run without the reasoning parser or its answer can be swallowed.
+        self.reasoning_parser, self.tool_call_parser = reasoning_parser, tool_call_parser
         self.proc: subprocess.Popen | None = None
 
     @property
@@ -76,12 +81,11 @@ class VllmServer:
             str(self.max_num_seqs),
             "--gpu-memory-utilization",
             str(self.gpu_fraction),
-            "--reasoning-parser",
-            "qwen3",
-            "--enable-auto-tool-choice",
-            "--tool-call-parser",
-            "qwen3_xml",
         ]
+        if self.reasoning_parser:
+            cmd += ["--reasoning-parser", self.reasoning_parser]
+        if self.tool_call_parser:
+            cmd += ["--enable-auto-tool-choice", "--tool-call-parser", self.tool_call_parser]
         if self.lora_path:
             cmd += [
                 "--enable-lora",
