@@ -73,7 +73,7 @@ finetune:
   epochs: 1
   per_device_batch: 4
   grad_accum: 4
-  max_length: 3072
+  max_length: 4096
   seed: 0
 
 evaluation:

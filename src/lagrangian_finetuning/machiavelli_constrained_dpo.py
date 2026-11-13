@@ -157,10 +157,24 @@ def dpo_train(cfg, pairs: list[dict], out_dir: Path, log=print) -> Path:
         target_modules=list(f.lora_target_modules),
         task_type="CAUSAL_LM",
     )
-    rows = [
-        {"prompt": p["prompt"], "chosen": p["chosen"], "rejected": p["rejected"]}
-        for p in pairs
-    ]
+    # TRL truncates prompt+answer from the end; an over-long prompt would lose the
+    # one-token answer the pair is about, so those pairs are dropped instead.
+    budget = int(f.max_length) - 16
+    rows, too_long = [], 0
+    for p in pairs:
+        n_tok = len(
+            tok(tok.apply_chat_template(p["prompt"], tokenize=False, add_generation_prompt=True))["input_ids"]
+        )
+        if n_tok > budget:
+            too_long += 1
+            continue
+        rows.append(
+            {"prompt": p["prompt"], "chosen": p["chosen"], "rejected": p["rejected"]}
+        )
+    log(
+        f"DPO pairs: {len(rows)} kept, {too_long} dropped for prompts over {budget} tokens"
+    )
+    sft_w = float(f.rpo_alpha) if f.get("rpo_alpha") else 0.0
     kwargs = dict(
         output_dir=str(out_dir / "trainer"),
         per_device_train_batch_size=int(f.per_device_batch),
@@ -168,10 +182,8 @@ def dpo_train(cfg, pairs: list[dict], out_dir: Path, log=print) -> Path:
         learning_rate=float(f.lr),
         num_train_epochs=float(f.epochs),
         beta=float(f.beta),
-        rpo_alpha=float(f.rpo_alpha) if f.rpo_alpha is not None else None,
         max_length=int(f.max_length),
-        max_prompt_length=int(f.max_length) - 16,
-        truncation_mode="keep_end",
+        truncation_mode="keep_start",
         bf16=True,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
@@ -184,12 +196,19 @@ def dpo_train(cfg, pairs: list[dict], out_dir: Path, log=print) -> Path:
         remove_unused_columns=False,
     )
     accepted = set(DPOConfig.__dataclass_fields__)
+    # NLL on the chosen answer against likelihood collapse: TRL >= 1.0 spells it as
+    # an extra "sft" loss term, older TRL as rpo_alpha.
+    if sft_w > 0:
+        if "loss_weights" in accepted:
+            kwargs.update(loss_type=["sigmoid", "sft"], loss_weights=[1.0, sft_w])
+        else:
+            kwargs["rpo_alpha"] = sft_w
     dropped = sorted(k for k in kwargs if k not in accepted)
     if dropped:
         log(f"DPOConfig does not accept {dropped}; dropped")
     args = DPOConfig(**{k: v for k, v in kwargs.items() if k in accepted})
     log(
-        f"DPO on {len(rows)} pairs: beta={args.beta} lr={args.learning_rate} epochs={args.num_train_epochs} rpo_alpha={getattr(args, 'rpo_alpha', None)}"
+        f"DPO on {len(rows)} pairs: beta={args.beta} lr={args.learning_rate} epochs={args.num_train_epochs} loss={getattr(args, 'loss_type', None)} weights={getattr(args, 'loss_weights', None)} rpo_alpha={getattr(args, 'rpo_alpha', None)}"
     )
     trainer = DPOTrainer(
         model=model,
