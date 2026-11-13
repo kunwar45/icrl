@@ -1,0 +1,127 @@
+# ABOUTME: MACHIAVELLI ICRL with Qwen2.5-32B and paired same-scene demos: an aligned-expert prompt and a nudged-unsafe actor answer the identical scenes on 126 games, C_theta trains on matched pairs
+# ABOUTME: Run: CONFIG=configs/lagrangian_finetuning/machiavelli_constrained_dpo_qwen32b_paired.yaml STAGES=demos EXTRA="--override demos.shard=0/2" sbatch ... scripts/slurm/run_machiavelli_icrl_pipeline_job.sh (prompt_check, base_eval, constraint, finetune, evaluate likewise)
+run_name: machiavelli_constrained_dpo_qwen32b_paired_v1
+
+machiavelli_root: ${oc.env:MACHIAVELLI_ROOT}
+
+games:
+  # Fine-tuning and training-split evaluation: the same 20 of the benchmark's
+  # 30 test games as qwen32b_v1, so the two runs compare directly.
+  train: [avatar-of-the-wolf, battlemage, cliffhanger, death-collector, fate-of-the-storm-gods,
+          hero-of-kendrickstone, hero-project-open-season, hero-project-redemption-season, heroes-of-myth,
+          hollywood-visionary, i-cyborg, kidnapped, kung-fu, luminous-underground, metahuman-inc,
+          midsummer-nights-choice, mysteries-of-baroque, pendragon-rising, ratings-war, sea-eternal]
+  # Never seen before evaluation; identical to qwen32b_v1.
+  heldout: [seventh-sea-a-pirates-pact, slammed, t-rex-time-machine, tower-behind-the-moon,
+            trials-of-the-thief-taker, undercover-agent, vampire-the-masquerade_parliament-of-knives,
+            versus-deathscapes, versus-the-lost-ones, werewolves-haven-rising]
+  # Paired-demo games: every benchmark working game except the 10 held-out ones
+  # (machiavelli/config.py working_games minus heldout), 126 games.
+  demo: [aegis-project-180-files, alexandria, avatar-of-the-wolf, battlemage, blackstone-academy, blood-money,
+         broadsides, broadsides-hms-foraker, broadway-1849, cannonfire-concerto, cat, champion-of-the-gods,
+         chronicon-apocalyptica, cliffhanger, creatures-such-as-we, creme-de-la-creme, crown-of-sorcery-and-steel,
+         cryptkeepers-of-hallowford, daring-mermaid-expedition, death-collector, deathless,
+         deathless-the-citys-thirst, demon-mark, diabolical, dinoknights, drag-star, dragon, dragon-and-the-djinn,
+         eagles-heir, empyrean, exile-of-the-gods, faeries-bargain, fate-of-the-storm-gods, fielders-choice, fleet,
+         fog-knows-your-name, fog-of-war-battle-for-cerberus, fool, for-rent-haunted-house, fox-spirit,
+         grand-academy-2-attack-of-the-sequel, grand-academy-for-villains, heart-of-the-house, hero-of-kendrickstone,
+         hero-project-open-season, hero-project-redemption-season, hero-unmasked, heroes-of-myth, heroes-rise,
+         heroes-rise-2-hero-project, heroes-rise-3-herofall, hollywood-visionary, i-cyborg, ironheart,
+         its-killing-time, jolly-good-cakes-and-ale, kidnapped, kung-fu, light-years-apart, luminous-underground,
+         magicians-workshop, mask-of-the-plague-doctor, mecha-ace, metahuman-inc, midsummer-nights-choice, mrs-claus,
+         mysteries-of-baroque, neighbourhood-necromancer, new-witch-in-town, ninja, nola-is-burning,
+         odyssey-echoes-of-war, orpheus-ruse, pendragon-rising, petal-throne, pirate, plays-the-thing, pon-para-2,
+         pon-para-and-the-great-southern-labyrinth, psy-high, psy-high-2-high-summer, pugmire, ratings-war, rebels,
+         reckless-space-pirates, rent-a-vice, road-to-canterbury, robots, rock-star, romance, runt-of-the-litter,
+         saga-of-the-north-wind, sea-eternal, showdown-at-willow-creek, siege-of-treboulain, silverworld,
+         sixth-grade-detective, skystrike, social-services-of-the-doomed, sorcery-is-for-saps, squires-tale,
+         star-captain, stronghold, superlatives, superlatives-shattered-worlds, sword-of-the-slayer, tally-ho,
+         teahouse, thieves-gambit-curse-of-the-black-cat, to-the-city-of-the-clouds, treasure-seekers-of-lady-luck,
+         vampire, vampire-the-masquerade_night-road, vampire-the-masquerade_out-for-blood,
+         vampire-the-masquerade_sins-of-the-sires, versus-elite-trials, viking, war-of-the-currents,
+         welcome-to-moreytown, werewolves-2-pack-mentality, weyrwood, wise-use-of-time, witchcraft-u,
+         wraiths-of-sentinel, zip, zombies]
+
+demos:
+  mode: paired
+  actor_kind: unsafe_nudged    # drives every demo episode
+  expert_kind: aligned_expert  # asked the identical scene at every step, never steps the game
+  shard: "0/1"                 # override per job: demos.shard=0/2, demos.shard=1/2
+
+prompt_check:
+  kinds: [expert, aligned_expert, nominal, unsafe_nudged]
+  games: [avatar-of-the-wolf, battlemage, cliffhanger, death-collector, fate-of-the-storm-gods]
+  seeds: [0, 1]
+  max_steps: 50
+
+policy:
+  model: Qwen/Qwen2.5-32B-Instruct
+  serve:
+    replicas: ["0,1", "2,3"]
+    tensor_parallel: 2
+    max_model_len: 8192
+    max_num_seqs: 64
+    gpu_fraction: 0.85
+    reasoning_parser: null
+    tool_call_parser: null
+
+rollouts:
+  max_steps: 50
+  workers: 128
+  temperature: 0.7
+  demo_seeds: [0, 1, 2, 3]
+  round_seeds: [10, 11, 12, 13]
+  option_returns:
+    horizon: 10
+    samples: 2
+
+constraint:
+  encoder_model: Qwen/Qwen2.5-1.5B
+  device: cuda:0
+  max_length: 768
+  scene_chars: 2000
+  head_hidden: 256
+  loss: paired_bce             # bce + within-state ranking on matched pairs (constraint_trainer)
+  beta: 0.8
+  lambda_c: 1.0
+  n_iterations: 20
+  n_constraint_steps: 50
+  batch_size: 16
+  lr: 1.0e-4
+  weight_decay: 0.01
+  max_demos_per_class: 20000   # matched pairs kept (pairs are subsampled whole)
+  seed: 0
+
+finetune:
+  rounds: 2
+  lambda_init: 1.0
+  lambda_lr: 4.0
+  lambda_max: 10.0
+  epsilon: 0.15
+  reward_scale: 2.0
+  pair_margin: 0.3
+  max_pairs_per_round: 600
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  lora_target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  beta: 0.1
+  rpo_alpha: 0.5
+  lr: 1.0e-5
+  epochs: 1
+  per_device_batch: 2
+  grad_accum: 2
+  dpo_gpus: "0,1,2,3"
+  quantize_4bit: true
+  max_length: 4096
+  seed: 0
+
+evaluation:
+  temperature: 0.2
+  seeds: [100, 101, 102, 103]
+  # nominal + expert episodes are copied from qwen32b_v1 (same model, games, seeds)
+  # and read back; only aligned_expert is played.
+  base_kinds: [nominal, expert, aligned_expert]
+
+output:
+  dir: ${oc.env:SCRATCH}/icrl/machiavelli/${run_name}

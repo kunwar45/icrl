@@ -19,6 +19,16 @@ stages can run as separate SLURM jobs that share one output directory):
 
 demos and base_eval are independent and can run as two jobs at once.
 
+With demos.mode = paired (the *_paired configs), demos are same-scene pairs: the
+actor prompt (demos.actor_kind) drives each episode on games.demo, and at every
+state the expert prompt (demos.expert_kind) is asked the identical scene. A pair
+is kept when the actor's pick is an avoidable violation and the expert's is a
+different, clean option; C_theta then trains on the matched rows (paired_bce).
+demos.shard = "i/n" splits games.demo across jobs, one file per shard.
+
+prompt_check (only when named in --stages) plays prompt_check.kinds on a few
+training games and prints each kind's ground-truth rates plus 5 example steps.
+
 Serving runs one vLLM server per entry of policy.serve.replicas (a GPU group
 each); requests for a game always go to the same server.
 
@@ -42,6 +52,8 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 STAGES = ("demos", "base_eval", "constraint", "finetune", "evaluate")
+# Run only when asked for by name: compares the prompt kinds before a big collection.
+OPTIONAL_STAGES = ("prompt_check",)
 
 
 def log(msg: str) -> None:
@@ -74,11 +86,17 @@ def load_cfg(path: Path, overrides: list[str], smoke: bool):
                         "n_constraint_steps": 5,
                         "max_demos_per_class": 64,
                     },
-                    "finetune": {"rounds": 1, "max_pairs_per_round": 16, "pair_margin": 0.0},
+                    "finetune": {
+                        "rounds": 1,
+                        "max_pairs_per_round": 16,
+                        "pair_margin": 0.0,
+                    },
                     "evaluation": {"seeds": [100]},
                 }
             ),
         )
+        if cfg.games.get("demo"):
+            cfg.games.demo = list(cfg.games.demo)[:2]
         cfg.output.dir = str(Path(cfg.output.dir).parent / cfg.run_name)
     cfg.output.dir = str(Path(cfg.output.dir).resolve())
     return cfg
@@ -100,6 +118,32 @@ def show_examples(title: str, episodes: list[dict], n: int = 5) -> None:
             f"forced={s['forced']} | per-option harms={s['option_harms']} | reward={s['reward']}"
         )
     print(flush=True)
+
+
+def show_paired_examples(title: str, episodes: list[dict], n: int = 5) -> None:
+    """Print, for n paired steps, the scene, both prompts' answers and both picks' ground truth."""
+    steps = [(e, s) for e in episodes for s in e["steps"]][:n]
+    print(f"\n{'=' * 30} {title}: {len(steps)} paired steps {'=' * 30}", flush=True)
+    for e, s in steps:
+        print(f"--- {e['game']} seed {e['seed']} step {s['t']} ---")
+        print("[ACTOR SYSTEM PROMPT]\n" + s["system"])
+        print("[EXPERT SYSTEM PROMPT]\n" + s["expert_system"])
+        print("[USER PROMPT, identical for both]\n" + s["user"])
+        print(
+            f"[ACTOR OUTPUT] {s['response']!r} -> action {s['action']} harms={s['harms']} "
+            f"avoidable={s['avoidable']}"
+        )
+        print(
+            f"[EXPERT OUTPUT] {s['expert_response']!r} -> action {s['expert_action']} "
+            f"harms={s['expert_harms']}"
+        )
+        print(f"[PER-OPTION HARMS] {s['option_harms']}")
+    print(flush=True)
+
+
+def demo_shard(cfg) -> tuple[int, int]:
+    i, n = str(cfg.demos.get("shard", "0/1")).split("/")
+    return int(i), int(n)
 
 
 @contextlib.contextmanager
@@ -167,7 +211,17 @@ def make_policy(servers, temperature: float):
     )
 
 
-def collect(cfg, policy, games, seeds, kind, *, option_returns=None):
+def collect(
+    cfg,
+    policy,
+    games,
+    seeds,
+    kind,
+    *,
+    option_returns=None,
+    expert_kind=None,
+    max_steps=None,
+):
     from src.environments.machiavelli.rollout_collector import collect_episodes
 
     return collect_episodes(
@@ -175,25 +229,36 @@ def collect(cfg, policy, games, seeds, kind, *, option_returns=None):
         list(seeds),
         kind,
         policy,
-        max_steps=int(cfg.rollouts.max_steps),
+        max_steps=int(max_steps or cfg.rollouts.max_steps),
         workers=int(cfg.rollouts.workers),
         option_returns=option_returns,
+        expert_kind=expert_kind,
         log=log,
     )
 
 
 def evaluate_policy(cfg, servers, tag: str, out: Path, kinds=("nominal",)) -> dict:
+    """Evaluate each kind on held-out and training games; a kind/split whose
+    episodes file already exists is read back instead of replayed."""
     from src.environments.machiavelli.rollout_collector import (
         episode_metrics,
+        load_episodes,
         save_episodes,
     )
 
-    pol = make_policy(servers, float(cfg.evaluation.temperature))
+    pol = make_policy(servers, float(cfg.evaluation.temperature)) if servers else None
     res = {}
     for kind in kinds:
         for split in ("heldout", "train"):
-            eps = collect(cfg, pol, cfg.games[split], cfg.evaluation.seeds, kind)
-            save_episodes(out / "eval" / f"{tag}_{kind}_{split}.jsonl", eps)
+            p = out / "eval" / f"{tag}_{kind}_{split}.jsonl"
+            if p.exists():
+                eps = load_episodes(p)
+                log(f"eval {tag} {kind} {split}: reusing {p.name}")
+            else:
+                if pol is None:
+                    raise RuntimeError(f"{p} missing and no server to produce it")
+                eps = collect(cfg, pol, cfg.games[split], cfg.evaluation.seeds, kind)
+                save_episodes(p, eps)
             res[f"{kind}_{split}"] = episode_metrics(eps)
             log(f"eval {tag} {kind} {split}: {json.dumps(res[f'{kind}_{split}'])}")
     (out / "eval" / f"{tag}_metrics.json").write_text(json.dumps(res, indent=2))
@@ -209,6 +274,8 @@ def stage_demos(cfg, out: Path, smoke: bool) -> None:
         save_episodes,
     )
 
+    if cfg.get("demos") and cfg.demos.get("mode") == "paired":
+        return stage_paired_demos(cfg, out, smoke)
     if (out / "demos" / "summary.json").exists():
         log("demos: done already")
         return
@@ -225,12 +292,96 @@ def stage_demos(cfg, out: Path, smoke: bool) -> None:
     (out / "demos" / "summary.json").write_text(json.dumps(summary, indent=2))
 
 
+def stage_paired_demos(cfg, out: Path, smoke: bool) -> None:
+    from src.environments.machiavelli.rollout_collector import (
+        episode_metrics,
+        save_episodes,
+    )
+    from src.icrl_dual_training.machiavelli_step_constraint import accept_matched_pair
+
+    i, n = demo_shard(cfg)
+    summary_p = out / "demos" / f"paired_summary_shard{i}.json"
+    if summary_p.exists():
+        log(f"paired demos shard {i}/{n}: done already")
+        return
+    games = list(cfg.games.demo)[i::n]
+    d = cfg.demos
+    log(
+        f"paired demos shard {i}/{n}: {len(games)} games x {len(cfg.rollouts.demo_seeds)} seeds, "
+        f"actor={d.actor_kind} expert={d.expert_kind}"
+    )
+    with served(cfg, out / "demos", None) as servers:
+        eps = collect(
+            cfg,
+            make_policy(servers, float(cfg.rollouts.temperature)),
+            games,
+            cfg.rollouts.demo_seeds,
+            str(d.actor_kind),
+            expert_kind=str(d.expert_kind),
+        )
+    save_episodes(out / "demos" / f"paired_shard{i}.jsonl", eps)
+    summary = episode_metrics(eps)
+    summary["matched_pairs"] = sum(
+        accept_matched_pair(s) for e in eps for s in e["steps"]
+    )
+    summary["games"] = games
+    summary_p.write_text(json.dumps(summary, indent=2))
+    log(
+        f"paired demos shard {i}/{n}: {json.dumps({k: v for k, v in summary.items() if k != 'games'})}"
+    )
+    if smoke:
+        show_paired_examples(
+            f"paired demos, actor '{d.actor_kind}' / expert '{d.expert_kind}'", eps
+        )
+
+
+def stage_prompt_check(cfg, out: Path) -> None:
+    """Each prompt kind on a few training games: ground-truth rates and 5 example steps per kind."""
+    from src.environments.machiavelli.rollout_collector import (
+        episode_metrics,
+        save_episodes,
+    )
+
+    pc = cfg.prompt_check
+    pdir = out / "prompt_check"
+    res = {}
+    with served(cfg, pdir, None) as servers:
+        pol = make_policy(servers, float(cfg.rollouts.temperature))
+        for kind in pc.kinds:
+            eps = collect(
+                cfg, pol, pc.games, pc.seeds, str(kind), max_steps=int(pc.max_steps)
+            )
+            save_episodes(pdir / f"{kind}.jsonl", eps)
+            res[str(kind)] = episode_metrics(eps)
+            show_examples(f"prompt check '{kind}'", eps)
+    (pdir / "metrics.json").write_text(json.dumps(res, indent=2))
+    log(
+        "PROMPT CHECK (avoidable violation rate [95% CI] | violation rate | points % | invalid rate)"
+    )
+    for kind, m in res.items():
+        lo, hi = m["avoidable_violation_rate_ci95"]
+        log(
+            f"  {kind:<16} {m['avoidable_violation_rate']:.3f} [{lo:.3f}, {hi:.3f}] | "
+            f"{m['violation_rate']:.3f} | {m['points_pct']:.2f} | {m['invalid_rate']:.3f}"
+        )
+
+
 def stage_base_eval(cfg, out: Path) -> None:
     if (out / "eval" / "base_metrics.json").exists():
         log("base_eval: done already")
         return
+    kinds = tuple(cfg.evaluation.get("base_kinds") or ("nominal", "expert"))
+    todo = [
+        k
+        for k in kinds
+        for s in ("heldout", "train")
+        if not (out / "eval" / f"base_{k}_{s}.jsonl").exists()
+    ]
+    if not todo:
+        evaluate_policy(cfg, None, "base", out, kinds=kinds)
+        return
     with served(cfg, out / "eval", None) as servers:
-        evaluate_policy(cfg, servers, "base", out, kinds=("nominal", "expert"))
+        evaluate_policy(cfg, servers, "base", out, kinds=kinds)
 
 
 def constraint_eval(cfg, out: Path, model=None) -> dict | None:
@@ -271,6 +422,7 @@ def stage_constraint(cfg, out: Path) -> None:
     from src.environments.machiavelli.rollout_collector import load_episodes
     from src.icrl_dual_training.machiavelli_step_constraint import (
         demo_steps,
+        paired_demo_steps,
         train_step_constraint,
     )
 
@@ -279,11 +431,24 @@ def stage_constraint(cfg, out: Path) -> None:
         log("constraint: trained already")
         constraint_eval(cfg, out)
         return
-    expert, unsafe = demo_steps(
-        load_episodes(out / "demos" / "expert.jsonl"),
-        load_episodes(out / "demos" / "nominal.jsonl"),
-        scene_chars=int(cfg.constraint.scene_chars),
-    )
+    sc = int(cfg.constraint.scene_chars)
+    if cfg.get("demos") and cfg.demos.get("mode") == "paired":
+        _, n = demo_shard(cfg)
+        shards = [out / "demos" / f"paired_shard{i}.jsonl" for i in range(n)]
+        missing = [p.name for p in shards if not p.exists()]
+        if missing:
+            raise RuntimeError(f"paired demo shards missing: {missing}")
+        eps = [e for p in shards for e in load_episodes(p)]
+        expert, unsafe = paired_demo_steps(eps, scene_chars=sc)
+        log(
+            f"constraint: {len(expert)} matched same-scene pairs from {len(eps)} paired episodes"
+        )
+    else:
+        expert, unsafe = demo_steps(
+            load_episodes(out / "demos" / "expert.jsonl"),
+            load_episodes(out / "demos" / "nominal.jsonl"),
+            scene_chars=sc,
+        )
     model = train_step_constraint(cfg, expert, unsafe, cdir, log=log)
     constraint_eval(cfg, out, model)
 
@@ -403,6 +568,16 @@ def stage_evaluate(cfg, out: Path) -> None:
                     tuned[f"nominal_{split}"][k],
                     tuned[f"nominal_{split}"][k + "_ci95"],
                 ],
+                **(
+                    {
+                        "base_aligned_expert_prompt": [
+                            base[f"aligned_expert_{split}"][k],
+                            base[f"aligned_expert_{split}"][k + "_ci95"],
+                        ]
+                    }
+                    if f"aligned_expert_{split}" in base
+                    else {}
+                ),
             }
             for k in keys
         }
@@ -433,13 +608,17 @@ def main() -> int:
     from omegaconf import OmegaConf
 
     stages = [s for s in a.stages.split(",") if s]
-    unknown = sorted(set(stages) - set(STAGES))
+    unknown = sorted(set(stages) - set(STAGES) - set(OPTIONAL_STAGES))
     if unknown:
-        raise SystemExit(f"unknown stages {unknown}; choose from {STAGES}")
+        raise SystemExit(
+            f"unknown stages {unknown}; choose from {STAGES + OPTIONAL_STAGES}"
+        )
     (out / f"config_resolved_{'_'.join(stages)}.yaml").write_text(
         OmegaConf.to_yaml(cfg, resolve=True)
     )
     log(f"run {cfg.run_name} -> {out}; stages {stages}")
+    if "prompt_check" in stages:
+        stage_prompt_check(cfg, out)
     if "demos" in stages:
         stage_demos(cfg, out, a.smoke)
     if "base_eval" in stages:

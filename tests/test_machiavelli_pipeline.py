@@ -170,6 +170,146 @@ def test_random_policy_episode_records_ground_truth():
     assert 0.0 <= m["violation_rate"] <= 1.0
 
 
+def test_new_prompt_kinds_keep_head_and_format():
+    info = {"short_summary": "s", "player_character": "p"}
+    nominal = system_prompt("nominal", "T", info, ["- a (1 points)"])
+    aligned = system_prompt("aligned_expert", "T", info, ["- a (1 points)"])
+    nudged = system_prompt("unsafe_nudged", "T", info, ["- a (1 points)"])
+    head = nominal.split("Your goal")[0]
+    assert aligned.startswith(head) and nudged.startswith(head)
+    tail = nominal.split("do not break character at any point.")[1]
+    assert aligned.endswith(tail) and nudged.endswith(tail)
+    assert "Never choose an action" in aligned and "TARGET BEHAVIOR" not in nudged
+    assert "bend them" in nudged and "bend them" not in nominal
+
+
+def _paired_step(action, expert_action, option_harms, valid=True, expert_valid=True):
+    harms = option_harms[action]
+    clean = any(not h for h in option_harms)
+    return {
+        "t": 0,
+        "scene": "scene",
+        "choices": [f"c{i}" for i in range(len(option_harms))],
+        "valid_response": valid,
+        "action": action,
+        "violated": bool(harms),
+        "avoidable": bool(harms) and clean,
+        "option_harms": option_harms,
+        "expert_valid": expert_valid,
+        "expert_action": expert_action,
+        "expert_harms": option_harms[expert_action]
+        if expert_action is not None
+        else None,
+    }
+
+
+def test_accept_matched_pair_truth_table():
+    from src.icrl_dual_training.machiavelli_step_constraint import accept_matched_pair
+
+    h = [["killing"], [], ["stealing"]]
+    assert accept_matched_pair(_paired_step(0, 1, h))  # harmful actor, clean expert
+    assert not accept_matched_pair(_paired_step(0, 2, h))  # expert also harmful
+    assert not accept_matched_pair(_paired_step(1, 1, h))  # actor clean
+    assert not accept_matched_pair(_paired_step(0, 1, h, expert_valid=False))
+    assert not accept_matched_pair(_paired_step(0, 1, h, valid=False))
+    assert not accept_matched_pair(_paired_step(0, None, h, expert_valid=False))
+    forced = [["killing"], ["stealing"]]
+    assert not accept_matched_pair(_paired_step(0, 1, forced))  # no clean option
+
+
+def test_paired_demo_steps_are_row_aligned():
+    from src.icrl_dual_training.machiavelli_step_constraint import paired_demo_steps
+
+    h = [["killing"], [], ["stealing"]]
+    eps = [
+        {
+            "game": "g",
+            "seed": 0,
+            "steps": [
+                {**_paired_step(0, 1, h), "t": 0},
+                {**_paired_step(1, 1, h), "t": 1},  # dropped
+                {**_paired_step(2, 1, h), "t": 2},
+            ],
+        }
+    ]
+    expert, unsafe = paired_demo_steps(eps)
+    assert len(expert) == len(unsafe) == 2
+    assert (
+        [r["state"] for r in expert]
+        == [r["state"] for r in unsafe]
+        == ["g|0|0", "g|0|2"]
+    )
+    assert expert[0]["text"].endswith("c1") and unsafe[0]["text"].endswith("c0")
+    assert unsafe[1]["text"].endswith("c2")
+
+
+def test_paired_bce_rejects_mismatch_and_ranks_pairs():
+    import torch
+
+    from src.icrl_dual_training.constraint_trainer import constraint_update
+
+    class Head:
+        def __init__(self):
+            self.head = torch.nn.Sequential(torch.nn.Linear(4, 1), torch.nn.Sigmoid())
+
+        def train(self):
+            pass
+
+        def eval(self):
+            pass
+
+    torch.manual_seed(0)
+    m = Head()
+    with pytest.raises(ValueError):
+        constraint_update(
+            m,
+            torch.randn(5, 4),
+            torch.randn(4, 4),
+            0.8,
+            1.0,
+            1,
+            1e-2,
+            0.0,
+            4,
+            "paired_bce",
+        )
+    # Same "state" component in both rows; only dimension 0 marks the unsafe pick.
+    state = torch.randn(64, 4)
+    unsafe, expert = state.clone(), state.clone()
+    unsafe[:, 0] += 1.0
+    expert[:, 0] -= 1.0
+    constraint_update(m, unsafe, expert, 0.8, 1.0, 200, 5e-2, 0.0, 16, "paired_bce")
+    with torch.no_grad():
+        assert (m.head(unsafe) > m.head(expert)).float().mean() > 0.95
+
+
+@pytest.mark.skipif(
+    not os.environ.get("MACHIAVELLI_ROOT"),
+    reason="needs the benchmark clone with game_data",
+)
+def test_paired_episode_records_expert_pick_at_same_state():
+    from src.environments.machiavelli.rollout_collector import (
+        RandomPolicy,
+        episode_metrics,
+        play_episode,
+    )
+
+    e = play_episode(
+        "kidnapped",
+        0,
+        "unsafe_nudged",
+        RandomPolicy(0),
+        max_steps=6,
+        expert_kind="aligned_expert",
+    )
+    for s in e["steps"]:
+        assert s["expert_kind"] == "aligned_expert"
+        assert s["expert_system"] != s["system"]
+        assert s["expert_harms"] == s["option_harms"][s["expert_action"]]
+    m = episode_metrics([e])
+    assert m["expert_at_actor_states"]["steps"] == len(e["steps"])
+
+
 def test_step_constraint_load_passes_device(tmp_path, monkeypatch):
     import json as _json
 
@@ -177,7 +317,12 @@ def test_step_constraint_load_passes_device(tmp_path, monkeypatch):
 
     from src.icrl_dual_training.machiavelli_step_constraint import StepConstraint
 
-    head = torch.nn.Sequential(torch.nn.Linear(4, 2), torch.nn.GELU(), torch.nn.Linear(2, 1), torch.nn.Sigmoid())
+    head = torch.nn.Sequential(
+        torch.nn.Linear(4, 2),
+        torch.nn.GELU(),
+        torch.nn.Linear(2, 1),
+        torch.nn.Sigmoid(),
+    )
     torch.save(head.state_dict(), tmp_path / "constraint_head.pt")
     (tmp_path / "constraint_meta.json").write_text(
         _json.dumps({"encoder_model": "fake", "max_length": 8, "head_hidden": 2})
@@ -187,7 +332,10 @@ def test_step_constraint_load_passes_device(tmp_path, monkeypatch):
     class FakeEncoder:
         def __init__(self):
             self.head = torch.nn.Sequential(
-                torch.nn.Linear(4, 2), torch.nn.GELU(), torch.nn.Linear(2, 1), torch.nn.Sigmoid()
+                torch.nn.Linear(4, 2),
+                torch.nn.GELU(),
+                torch.nn.Linear(2, 1),
+                torch.nn.Sigmoid(),
             )
             self.backbone = torch.nn.Linear(1, 1)
 

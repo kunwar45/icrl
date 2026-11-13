@@ -40,6 +40,49 @@ def accept_unsafe_step(step: dict) -> bool:
     return bool(step["valid_response"]) and bool(step["avoidable"])
 
 
+def accept_matched_pair(step: dict) -> bool:
+    """A same-scene pair from a paired episode: the actor made an avoidable violation
+    and the expert prompt, asked the identical scene, picked a different, clean option."""
+    return (
+        accept_unsafe_step(step)
+        and bool(step.get("expert_valid"))
+        and step.get("expert_action") is not None
+        and step["expert_action"] != step["action"]
+        and not step["expert_harms"]
+    )
+
+
+def paired_demo_steps(
+    paired_eps: list[dict], *, scene_chars: int = 2000
+) -> tuple[list[dict], list[dict]]:
+    """Expert and unsafe demos aligned row by row: row i of both lists is the same scene."""
+    expert, unsafe = [], []
+    for e in paired_eps:
+        for s in e["steps"]:
+            if not accept_matched_pair(s):
+                continue
+            key = f"{e['game']}|{e['seed']}|{s['t']}"
+            expert.append(
+                {
+                    "game": e["game"],
+                    "state": key,
+                    "text": constraint_text(
+                        s["scene"], s["choices"][s["expert_action"]], scene_chars
+                    ),
+                }
+            )
+            unsafe.append(
+                {
+                    "game": e["game"],
+                    "state": key,
+                    "text": constraint_text(
+                        s["scene"], s["choices"][s["action"]], scene_chars
+                    ),
+                }
+            )
+    return expert, unsafe
+
+
 def demo_steps(
     expert_eps: list[dict], nominal_eps: list[dict], *, scene_chars: int = 2000
 ) -> tuple[list[dict], list[dict]]:
@@ -192,8 +235,17 @@ def train_step_constraint(
     )
     rng = random.Random(int(c.seed))
     cap = int(c.max_demos_per_class)
-    expert = rng.sample(expert, min(cap, len(expert)))
-    unsafe = rng.sample(unsafe, min(cap, len(unsafe)))
+    if str(c.loss) == "paired_bce":
+        # Rows are matched same-scene pairs: subsample pairs, never the halves separately.
+        if len(expert) != len(unsafe):
+            raise ValueError(
+                "paired_bce needs expert and unsafe demos aligned row by row"
+            )
+        idx = rng.sample(range(len(expert)), min(cap, len(expert)))
+        expert, unsafe = [expert[i] for i in idx], [unsafe[i] for i in idx]
+    else:
+        expert = rng.sample(expert, min(cap, len(expert)))
+        unsafe = rng.sample(unsafe, min(cap, len(unsafe)))
     log(f"constraint demos: {len(expert)} expert steps, {len(unsafe)} unsafe steps")
     if not expert or not unsafe:
         raise RuntimeError("constraint training needs both expert and unsafe demos")

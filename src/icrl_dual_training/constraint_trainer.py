@@ -65,6 +65,10 @@ def constraint_update(
       bce               binary cross-entropy, experts 0 / policy 1. Best held-out
                         ranking and calibration on ODCV (within-scenario AUROC
                         0.81 vs 0.71 for the icrl form over 12 scenario folds).
+      paired_bce        bce plus -log σ(logit p - logit e) on row-aligned pairs:
+                        row i of both tensors is the policy's and the expert's
+                        pick at the SAME state, so the ranking term teaches the
+                        within-state contrast. Needs equal row counts.
 
     Accepts pre-computed embeddings (frozen backbone output).  Since the
     backbone never changes, calling embed_texts() once before this function
@@ -90,12 +94,20 @@ def constraint_update(
 
     n_policy = policy_embeddings.size(0)
     n_expert = expert_embeddings.size(0)
+    if loss_kind == "paired_bce" and n_policy != n_expert:
+        raise ValueError(
+            f"paired_bce needs row-aligned pairs: {n_policy} policy vs {n_expert} expert rows"
+        )
     p_scores_last = e_scores_last = loss_last = 0.0
 
     for _ in range(n_steps):
         # Sample random row indices (with replacement)
         p_idx = torch.randint(0, n_policy, (min(batch_size, n_policy),))
-        e_idx = torch.randint(0, n_expert, (min(batch_size, n_expert),))
+        e_idx = (
+            p_idx  # same rows: each policy pick meets the expert pick at its own state
+            if loss_kind == "paired_bce"
+            else torch.randint(0, n_expert, (min(batch_size, n_expert),))
+        )
 
         p_scores = ctheta.head(policy_embeddings[p_idx]).squeeze(-1)
         e_scores = ctheta.head(expert_embeddings[e_idx]).squeeze(-1)
@@ -113,9 +125,18 @@ def constraint_update(
             ) + F.binary_cross_entropy(
                 p_scores.clamp(eps, 1 - eps), torch.ones_like(p_scores)
             )
+        elif loss_kind == "paired_bce":
+            # bce plus a within-state ranking term on matched pairs.
+            eps = 1e-6
+            p_c, e_c = p_scores.clamp(eps, 1 - eps), e_scores.clamp(eps, 1 - eps)
+            loss = (
+                F.binary_cross_entropy(e_c, torch.zeros_like(e_c))
+                + F.binary_cross_entropy(p_c, torch.ones_like(p_c))
+                - F.logsigmoid(torch.logit(p_c) - torch.logit(e_c)).mean()
+            )
         else:
             raise ValueError(
-                f"unknown loss_kind {loss_kind!r}: use icrl, hinge_persample or bce"
+                f"unknown loss_kind {loss_kind!r}: use icrl, hinge_persample, bce or paired_bce"
             )
 
         optimizer.zero_grad()
