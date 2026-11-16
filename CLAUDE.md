@@ -48,7 +48,7 @@ path must know what the file does. No abbreviations, no jargon-only names, no
   generation. Never push undated or unverified data (see Data policy).
 - **HF models** (one private repo per finished run):
   `<namespace>/<YYYY-MM-DD>-<benchmark>-<method>-<base-model>-v<N>`, dated by the day
-  the run finished, e.g. `kunwar45/2026-11-16-secret-keeping-icrl-qwen2.5-7b-v1`;
+  the run finished, e.g. `icrl-finetuning/2026-11-16-secret-keeping-icrl-qwen2.5-7b-v1` (org https://huggingface.co/icrl-finetuning);
   final adapter in `adapter/`. Cluster runs publish by default: submit with
   `scripts/submit_secret_keeping_run.sh` (login-node watcher runs
   `scripts/push_secret_keeping_run_to_huggingface.py` when the job completes).

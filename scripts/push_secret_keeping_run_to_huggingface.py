@@ -173,7 +173,7 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--run-dir", type=Path, required=True)
-    ap.add_argument("--namespace", default="kunwar45")
+    ap.add_argument("--namespace", default="icrl-finetuning")
     ap.add_argument(
         "--with-demos",
         action="store_true",

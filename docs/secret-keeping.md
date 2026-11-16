@@ -120,11 +120,11 @@ Other runs of the classifier baseline, for the record:
 ## Publishing
 
 Every finished run goes to a private Hugging Face model repo
-`kunwar45/<YYYY-MM-DD>-secret-keeping-<method>-qwen2.5-7b-v<N>` (method: `icrl`,
+`icrl-finetuning/<YYYY-MM-DD>-secret-keeping-<method>-qwen2.5-7b-v<N>` (method: `icrl`,
 `classifier-grpo`, `classifier-dpo`, `expert-sft`, `exact-check-grpo`,
 `llm-judge-grpo`), with the final LoRA adapter in `adapter/`, constraint heads,
 configs, eval outputs and `results.json`. The training demos are the private dataset
-`kunwar45/2026-11-15-secret-keeping-demos`. Submit runs with
+`icrl-finetuning/2026-11-15-secret-keeping-demos`. Submit runs with
 `CONFIG=... scripts/submit_secret_keeping_run.sh` on a fir login node: it publishes
 automatically when the job completes (needs `hf auth login` once on that node; compute
 nodes have no internet). To publish by hand:
