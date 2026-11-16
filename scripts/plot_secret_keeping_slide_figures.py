@@ -776,7 +776,6 @@ def training_curves(log: Path, out: Path, window: int = 25) -> None:
 ALL_METHODS = [
     ("Base model", 73.75, (68.4, 78.9), 6.43, 7.84, (7.57, 8.10), "secret_keeping_constrained_dpo_qwen7b_v1 base_nominal"),
     ("Base model told the rule", 50.1, (44.2, 56.1), 3.83, 7.79, (7.54, 8.04), "secret_keeping_constrained_dpo_qwen7b_v1 base_expert"),
-    ("RL + prompted LLM judge", 45.6, (39.7, 51.6), 5.29, 8.56, (8.33, 8.76), "secret_keeping_grpo_llm_judge_cost_qwen7b_v1"),
     ("RL + exact constraint check", 38.0, (32.0, 43.6), 6.29, 8.49, (8.29, 8.68), "secret_keeping_grpo_exact_leak_cost_qwen7b_v1"),
     ("SFT on expert replies", 33.5, (27.6, 39.5), 3.01, 7.67, (7.38, 7.97), "secret_keeping_expert_sft_qwen7b_v1"),
     ("Constraint classifier + RLHF", 29.9, (24.6, 35.9), 3.01, 7.56, (7.22, 7.86), "secret_keeping_constrained_grpo_qwen7b_v2"),
