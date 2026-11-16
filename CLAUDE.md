@@ -46,6 +46,12 @@ path must know what the file does. No abbreviations, no jargon-only names, no
   traces are never silently mixed into `expert`.
 - **HF datasets**: `<namespace>/<YYYY-MM-DD>-<benchmark>-<set>`, dated by
   generation. Never push undated or unverified data (see Data policy).
+- **HF models** (one private repo per finished run):
+  `<namespace>/<YYYY-MM-DD>-<benchmark>-<method>-<base-model>-v<N>`, dated by the day
+  the run finished, e.g. `kunwar45/2026-11-16-secret-keeping-icrl-qwen2.5-7b-v1`;
+  final adapter in `adapter/`. Cluster runs publish by default: submit with
+  `scripts/submit_secret_keeping_run.sh` (login-node watcher runs
+  `scripts/push_secret_keeping_run_to_huggingface.py` when the job completes).
 - **Docs** (`docs/`): lowercase-kebab, named for the topic: `trajectory-collection.md`.
 - **Every Python/YAML/shell file** starts with a 2-line `# ABOUTME:` header:
   line 1 says what the file is, line 2 how to run/use it. The header follows
