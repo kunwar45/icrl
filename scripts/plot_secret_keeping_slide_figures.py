@@ -771,6 +771,122 @@ def training_curves(log: Path, out: Path, window: int = 25) -> None:
     )
 
 
+# Every method on the held-out test set (eval/*_metrics.json of each run):
+# (label, violation %, (lo, hi), reward on attack chats, reward on normal chats, (lo, hi), run)
+ALL_METHODS = [
+    ("Base model", 73.75, (68.4, 78.9), 6.43, 7.84, (7.57, 8.10), "secret_keeping_constrained_dpo_qwen7b_v1 base_nominal"),
+    ("Base model told the rule", 50.1, (44.2, 56.1), 3.83, 7.79, (7.54, 8.04), "secret_keeping_constrained_dpo_qwen7b_v1 base_expert"),
+    ("RL + prompted LLM judge", 45.6, (39.7, 51.6), 5.29, 8.56, (8.33, 8.76), "secret_keeping_grpo_llm_judge_cost_qwen7b_v1"),
+    ("RL + exact constraint check", 38.0, (32.0, 43.6), 6.29, 8.49, (8.29, 8.68), "secret_keeping_grpo_exact_leak_cost_qwen7b_v1"),
+    ("SFT on expert replies", 33.5, (27.6, 39.5), 3.01, 7.67, (7.38, 7.97), "secret_keeping_expert_sft_qwen7b_v1"),
+    ("Constraint classifier + RLHF", 29.9, (24.6, 35.9), 3.01, 7.56, (7.22, 7.86), "secret_keeping_constrained_grpo_qwen7b_v2"),
+    ("ICRL (Malik et al. loop)", 55.75, (49.8, 61.8), 5.81, 8.40, (8.14, 8.64), "secret_keeping_icrl_loop_qwen7b_v1"),
+]
+METHOD_COLOURS = {
+    "ICRL (Malik et al. loop)": BLUE,
+    "Constraint classifier + RLHF": "#7a8aa6",
+    "RL + exact constraint check": ORANGE,
+    "RL + prompted LLM judge": "#e3a008",
+}
+
+
+def all_methods_comparison(out: Path) -> None:
+    """Three panels on the held-out test set: violation rate, reward on attack chats, reward on normal chats."""
+    fig, axs = plt.subplots(1, 3, figsize=(15, 4.6), facecolor=SURF, gridspec_kw={"width_ratios": [1.3, 1, 1]})
+    ys = list(range(len(ALL_METHODS)))[::-1]
+    panels = [
+        (axs[0], 1, 2, (0, 90), "Constraint violation rate, attack chats", "{:.0f}%", "lower is better"),
+        (axs[1], 3, None, (0, 10), "Reward on attack chats (0-10)", "{:.1f}", "higher = more compliant"),
+        (axs[2], 4, 5, (0, 10), "Reward on normal chats (0-10)", "{:.1f}", "higher is better"),
+    ]
+    for j, (ax, vi, ci, xlim, title, fmt, sub) in enumerate(panels):
+        ax.set_facecolor(SURF)
+        for y, row in zip(ys, ALL_METHODS):
+            ours = row[0].startswith("ICRL")
+            ax.barh(y, row[vi], height=0.6, color=BLUE if ours else GREY, zorder=2)
+            right = row[vi]
+            if ci is not None:
+                lo, hi = row[ci]
+                ax.plot([lo, hi], [y, y], color=INK2, lw=1.4, zorder=3)
+                right = hi
+            ax.text(right + xlim[1] * 0.015, y, fmt.format(row[vi]), va="center", fontsize=11,
+                    weight="bold", color=INK)
+        ax.set_xlim(*xlim)
+        ax.set_yticks(ys)
+        ax.set_yticklabels([r[0] for r in ALL_METHODS] if j == 0 else [], fontsize=11, color=INK)
+        if j == 0:
+            for t in ax.get_yticklabels():
+                if t.get_text().startswith("ICRL"):
+                    t.set_weight("bold")
+        ax.grid(axis="x", color="#e6e5e1", lw=0.8)
+        ax.set_axisbelow(True)
+        for sp in ("top", "right", "left"):
+            ax.spines[sp].set_visible(False)
+        ax.spines["bottom"].set_color("#a9a8a2")
+        ax.tick_params(axis="y", length=0)
+        ax.tick_params(axis="x", colors=INK2, labelsize=9)
+        ax.set_title(title, loc="left", fontsize=12, weight="bold", color=INK)
+        ax.set_xlabel(sub, fontsize=9.5, color=INK2)
+    fig.text(0.01, 0.01, "Held-out test chats (8 unseen businesses, 12 unseen attack styles), 200 attack + 200 normal "
+             "x 4 replies; line = 95% bootstrap interval. All RL: GRPO, 600 steps. One seed each.",
+             fontsize=9, color=INK2)
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    save(fig, out / "secret_keeping_all_methods_test_results.png")
+
+
+def _step_metrics(logs: list[Path]) -> list[dict]:
+    rows = []
+    for log in logs:
+        rows += [ast.literal_eval(m) for m in re.findall(r"(\{'loss'.*?\})", log.read_text())]
+    return rows
+
+
+def violation_over_training(compare: dict[str, list[Path]], out: Path, window: int = 25) -> None:
+    """Training-chat violation rate over GRPO steps for several methods (ICRL logs = its rounds, in order)."""
+    fig, ax = plt.subplots(figsize=(11, 4.8), facecolor=SURF)
+    ax.set_facecolor(SURF)
+    n_max = 0
+    ends = []  # end-of-line labels, spread apart below so they never overlap
+    for label, logs in compare.items():
+        rows = _step_metrics(logs)
+        la = np.array([float(r.get("gt_leaks_attack", 0) or 0) for r in rows])
+        na = np.array([float(r.get("gt_n_attack", 0) or 0) for r in rows])
+        v = np.array([la[max(0, i - window + 1):i + 1].sum() / max(na[max(0, i - window + 1):i + 1].sum(), 1e-9)
+                      for i in range(len(rows))]) * 100
+        step = np.arange(1, len(rows) + 1)
+        n_max = max(n_max, len(rows))
+        colour = METHOD_COLOURS.get(label, INK2)
+        ax.plot(step, v, color=colour, lw=2.6 if label.startswith("ICRL") else 1.8, zorder=3 if label.startswith("ICRL") else 2)
+        ends.append([v[-1], len(rows), f"{label}  {v[-1]:.0f}%", colour])
+        if label.startswith("ICRL") and len(logs) > 1:
+            per = len(rows) // len(logs)
+            for k in range(1, len(logs)):
+                ax.axvline(k * per, color=BLUE, lw=1, ls=(0, (4, 3)), alpha=0.6, zorder=1)
+            ax.text(per * 0.5, 97, "ICRL rounds: constraint re-fit at each dashed line", fontsize=9, color=BLUE, va="top")
+    ends.sort(key=lambda e: e[0])
+    for i in range(1, len(ends)):
+        ends[i][0] = max(ends[i][0], ends[i - 1][0] + 4.5)
+    for y, x, text, colour in ends:
+        ax.text(x + 8, y, text, color=colour, fontsize=10, va="center", weight="bold")
+    ax.set_xlim(0, n_max * 1.42)
+    ax.set_xticks([t for t in ax.get_xticks() if 0 <= t <= n_max])
+    ax.set_ylim(0, 100)
+    ax.grid(axis="y", color="#e6e5e1", lw=0.8)
+    ax.set_axisbelow(True)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    for s in ("left", "bottom"):
+        ax.spines[s].set_color("#a9a8a2")
+    ax.tick_params(colors=INK2, labelsize=9.5)
+    ax.set_xlabel("GRPO training step", fontsize=10, color=INK2)
+    ax.set_title("Constraint violation rate on training attack chats during GRPO (%)", loc="left",
+                  fontsize=12.5, weight="bold", color=INK)
+    fig.text(0.01, 0.01, f"{window}-step average of the policy's own training replies; exact constraint check, logged "
+             "only (never in the reward). Training chats, so not the test numbers.", fontsize=9, color=INK2)
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    save(fig, out / "secret_keeping_violation_over_grpo_training.png")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -783,8 +899,22 @@ def main() -> None:
         default=[],
         help="a run's rl/rl_train.log; one training-curve figure per log",
     )
+    ap.add_argument(
+        "--compare-log",
+        action="append",
+        default=[],
+        metavar="LABEL=LOG[,LOG...]",
+        help="training-curve comparison: method label and its rl_train.log(s) (ICRL: one per round, in order)",
+    )
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
+    all_methods_comparison(a.out)
+    if a.compare_log:
+        compare = {}
+        for item in a.compare_log:
+            label, logs = item.split("=", 1)
+            compare[label] = [Path(x) for x in logs.split(",")]
+        violation_over_training(compare, a.out)
     violation_vs_baselines(a.out)
     tldr_bars(a.out)
     eval_conversation(a.out)
