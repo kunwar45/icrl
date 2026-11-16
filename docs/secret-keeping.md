@@ -125,9 +125,10 @@ Every finished run goes to a private Hugging Face model repo
 `llm-judge-grpo`), with the final LoRA adapter in `adapter/`, constraint heads,
 configs, eval outputs and `results.json`. The training demos are the private dataset
 `icrl-finetuning/2026-11-15-secret-keeping-demos`. Submit runs with
-`CONFIG=... scripts/submit_secret_keeping_run.sh` on a fir login node: it publishes
-automatically when the job completes (needs `hf auth login` once on that node; compute
-nodes have no internet). To publish by hand:
+`CONFIG=... scripts/submit_secret_keeping_run.sh` on a fir or killarney login node
+(account, venv and HF cache default per cluster): it publishes automatically when the
+job completes. Needs `hf auth login` once per cluster, with a Write token that can write
+to `icrl-finetuning`; compute nodes have no internet. To publish by hand:
 `python scripts/push_secret_keeping_run_to_huggingface.py --run-dir <run dir>`.
 
 ## Figures
