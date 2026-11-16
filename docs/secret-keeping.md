@@ -123,3 +123,13 @@ Other runs of the classifier baseline, for the record:
 [--rl-log <run>/rl/rl_train.log]` regenerates the slide figures (eval example,
 reward-vs-constraint card, method diagrams, violation rate vs baselines,
 training curves).
+
+## Paper
+
+The Overleaf project is cloned at `paper/` (its own git repo, remote
+`https://git.overleaf.com/6a202d7aec398730c4ca37e3`; gitignored here, push with
+`git -C paper push`). `main.tex` is the original plan (two-stage: learn C_θ in an
+adversarial loop, then Lagrangian fine-tuning; ε sweep; RLHF and IRL-reward
+baselines; mechanistic probes). `prelim_method.tex` is a standalone methodology
+of what is actually implemented, with orange boxes marking every deviation from
+`main.tex`. Work-in-progress figures go in `paper/adhoc/`.
