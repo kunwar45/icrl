@@ -190,9 +190,14 @@ def auroc(scores, labels) -> float:
     neg = [s for s, l in zip(scores, labels) if not l]
     if not pos or not neg:
         return float("nan")
-    order = np.argsort(np.concatenate([pos, neg]))
+    allv = np.concatenate([pos, neg])
+    order = np.argsort(allv, kind="mergesort")
     ranks = np.empty(len(order))
     ranks[order] = np.arange(1, len(order) + 1)
+    for v in np.unique(allv):  # ties share their average rank (Mann-Whitney)
+        tie = allv == v
+        if tie.sum() > 1:
+            ranks[tie] = ranks[tie].mean()
     return float(
         (ranks[: len(pos)].sum() - len(pos) * (len(pos) + 1) / 2)
         / (len(pos) * len(neg))

@@ -315,3 +315,85 @@ def test_cost_audit_counts_violations():
     ]
     a = P.reply_detector_eval_from_costs(samples, [0.9, 0.2, 0.1])
     assert a["violation_rate_attack"] == 0.5 and a["auroc_all"] == 1.0
+
+
+def _context_dominated_data(seed=0):
+    """Attack-chat embeddings share a large context offset; only dim 1 says whether the reply leaks."""
+    import torch
+
+    g = torch.Generator().manual_seed(seed)
+    n = 200
+    attack = torch.zeros(n, 8)
+    attack[:, 0] = 5.0  # "this is an attack chat", same for every reply to it
+    expert = attack.clone() + 0.1 * torch.randn(n, 8, generator=g)
+    expert[:, 1] = -1.0  # refuses
+    policy = attack.clone().repeat(2, 1) + 0.1 * torch.randn(2 * n, 8, generator=g)
+    policy[:n, 1] = 1.0  # first copy leaks
+    policy[n:, 1] = -1.0  # second copy refuses, like the expert
+    pair = torch.arange(n).repeat(2)  # policy row i belongs to expert chat i % n
+    return expert, policy, pair
+
+
+def test_paired_update_separates_replies_within_the_same_chat():
+    import torch
+
+    from src.icrl_dual_training.maxent_constraint import MaxEntConstraintConfig, StepFeasibilityHead
+    from src.icrl_dual_training.secret_keeping_reply_constraint import paired_maxent_update
+
+    torch.manual_seed(0)
+    expert, policy, pair = _context_dominated_data()
+    head = StepFeasibilityHead(8, 16)
+    cfg = MaxEntConstraintConfig(n_steps=300, batch_trajectories=64, lr=1e-2)
+    stats = paired_maxent_update(head, expert, policy, pair, cfg, rank_weight=1.0)
+    with torch.no_grad():
+        leak, safe = head(policy[:200]).mean(), head(policy[200:]).mean()
+    assert leak < safe - 0.2 and stats["n_pairs"] == 400
+
+
+def test_inverse_step_dispatches_pucl_without_expansion():
+    import torch
+    from omegaconf import OmegaConf
+
+    from src.icrl_dual_training.maxent_constraint import MaxEntConstraintConfig, StepFeasibilityHead
+    from src.icrl_dual_training.secret_keeping_reply_constraint import inverse_step
+
+    torch.manual_seed(0)
+    expert, policy, pair = _context_dominated_data()
+
+    class Phi:
+        head = StepFeasibilityHead(8, 16)
+
+    ic = OmegaConf.create({"inverse_method": "pucl"})
+    cfg = MaxEntConstraintConfig(n_steps=50, batch_steps=64, pucl_keep_fraction=0.3)
+    stats, memory = inverse_step(Phi, expert, policy, pair, ic, cfg)
+    assert stats["n_reliable_negative_steps"] == 120  # 30% of 400, no per-trajectory expansion
+    _, memory2 = inverse_step(Phi, expert, policy, pair, ic, cfg, memory=memory)
+    assert memory2.shape[0] == 240  # negatives accumulate across rounds
+    with pytest.raises(ValueError):
+        inverse_step(Phi, expert, policy, pair, OmegaConf.create({"inverse_method": "nope"}), cfg)
+
+
+def test_audit_reports_within_attack_chat_separation():
+    import scripts.run_secret_keeping_icrl_pipeline as P
+
+    samples = [
+        {"kind": "attack", "id": "a", "violates": True},
+        {"kind": "attack", "id": "a", "violates": False},
+        {"kind": "benign", "id": "b", "violates": False},
+    ]
+    # constant cost inside the attack chat: separates attack from benign, not the replies
+    flat = P.reply_detector_eval_from_costs(samples, [0.9, 0.9, 0.1])
+    assert flat["auroc_all"] > 0.7 and flat["within_chat_violating_above_safe"] == 0.5
+    good = P.reply_detector_eval_from_costs(samples, [0.9, 0.2, 0.1])
+    assert good["within_chat_violating_above_safe"] == 1.0 and good["auroc_attack_chats"] == 1.0
+
+
+def test_icrl_variant_configs_select_their_inverse_method():
+    from pathlib import Path
+
+    import scripts.run_secret_keeping_icrl_pipeline as P
+
+    d = Path("configs/lagrangian_finetuning")
+    for name, method in (("", "maxent"), ("_paired", "maxent_paired"), ("_pucl", "pucl")):
+        cfg = P.load_cfg(d / f"secret_keeping_icrl_loop{name}_qwen7b.yaml", ["output.dir=/tmp/x"], smoke=False)
+        assert cfg.icrl.inverse_method == method

@@ -237,3 +237,76 @@ def maxent_round(phi: ReplyFeasibility, expert_emb, nominal_emb, mcfg) -> dict:
     return maxent_constraint_update(
         phi.head, one_step_batch(expert_emb), one_step_batch(nominal_emb), mcfg
     )
+
+
+INVERSE_METHODS = ("maxent", "maxent_paired", "pucl")
+
+
+def paired_maxent_update(head, expert_emb, nominal_emb, pair_expert_idx, cfg, rank_weight: float) -> dict:
+    """Malik et al. max-entropy update plus a same-context ranking term.
+
+    The plain update can lower feasibility on a whole CONTEXT (every reply to an
+    attack chat) instead of on the replies the expert avoids, which leaves no
+    contrast inside a GRPO group. The ranking term -log sigma(logit phi(expert
+    reply) - logit phi(policy reply)), over pairs from the same chat, forces the
+    feasibility to differ between replies to the same context.
+    pair_expert_idx[i] is the expert row for nominal row i's chat, or -1.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    device = next(head.parameters()).device
+    e, n = expert_emb.to(device), nominal_emb.to(device)
+    paired = (pair_expert_idx >= 0).nonzero(as_tuple=True)[0]
+    opt = torch.optim.AdamW(head.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    b = cfg.batch_trajectories
+    for _ in range(cfg.n_steps):
+        ei = torch.randint(0, e.shape[0], (min(b, e.shape[0]),), device=device)
+        ni = torch.randint(0, n.shape[0], (min(b, n.shape[0]),), device=device)
+        log_e = torch.log(head(e[ei]).clamp(1e-6, 1 - 1e-6))
+        log_n = torch.log(head(n[ni]).clamp(1e-6, 1 - 1e-6))
+        likelihood = cfg.beta * (log_e.mean() - log_n.mean())
+        sparsity = (1 - log_e.exp()).mean() + (1 - log_n.exp()).mean()
+        pi = paired[torch.randint(0, paired.numel(), (min(b, paired.numel()),), device=paired.device)].to(device)
+        pe = head(e[pair_expert_idx.to(device)[pi]]).clamp(1e-6, 1 - 1e-6)
+        pn = head(n[pi]).clamp(1e-6, 1 - 1e-6)
+        rank = -F.logsigmoid(torch.logit(pe) - torch.logit(pn)).mean()
+        loss = -likelihood + cfg.sparsity_coeff * sparsity + rank_weight * rank
+        opt.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(head.parameters(), cfg.grad_clip)
+        opt.step()
+    with torch.no_grad():
+        return {
+            "loss": float(loss),
+            "rank_loss": float(rank),
+            "mean_phi_expert": float(head(e).mean()),
+            "mean_phi_nominal": float(head(n).mean()),
+            "n_expert": int(e.shape[0]),
+            "n_nominal": int(n.shape[0]),
+            "n_pairs": int(paired.numel()),
+        }
+
+
+def inverse_step(phi, expert_emb, nominal_emb, pair_expert_idx, ic, mcfg, memory=None):
+    """One ICRL inverse step, by ic.inverse_method; returns (stats, new PUCL memory or None)."""
+    from src.icrl_dual_training.maxent_constraint import pucl_constraint_update
+
+    method = str(ic.get("inverse_method", "maxent"))
+    if method not in INVERSE_METHODS:
+        raise ValueError(f"icrl.inverse_method must be one of {INVERSE_METHODS}, got {method}")
+    if method == "maxent":
+        return maxent_round(phi, expert_emb, nominal_emb, mcfg), None
+    if method == "maxent_paired":
+        return paired_maxent_update(
+            phi.head, expert_emb, nominal_emb, pair_expert_idx, mcfg, float(ic.rank_weight)
+        ), None
+    # PUCL (Peng & Billard 2024): reliable negatives by distance to the demonstrations,
+    # cross-entropy against them, memory of past rounds' negatives. One-step
+    # trajectories, so no per-trajectory expansion.
+    stats, mem = pucl_constraint_update(
+        phi.head, one_step_batch(expert_emb), one_step_batch(nominal_emb), mcfg,
+        memory=memory, expand=False,
+    )
+    new_memory = mem if memory is None else __import__("torch").cat([memory, mem])
+    return stats, new_memory

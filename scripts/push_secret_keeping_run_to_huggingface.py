@@ -32,6 +32,14 @@ BASE_SLUG = "qwen2.5-7b"
 
 # run-name prefix (before _qwen7b_vN) -> (method slug, one-line description)
 METHODS = {
+    "secret_keeping_icrl_loop_paired": (
+        "icrl-paired",
+        "ICRL (Malik et al. 2021) with a same-chat ranking term in the inverse step, and Lagrangian GRPO.",
+    ),
+    "secret_keeping_icrl_loop_pucl": (
+        "icrl-pucl",
+        "ICRL with the PUCL inverse step (Peng & Billard 2024): reliable negatives only, and Lagrangian GRPO.",
+    ),
     "secret_keeping_icrl_loop": (
         "icrl",
         "ICRL (Malik et al. 2021): alternating max-entropy constraint updates on the current policy's "

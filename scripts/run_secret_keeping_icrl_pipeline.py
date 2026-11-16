@@ -47,7 +47,16 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-STAGES = ("demos", "base_eval", "constraint", "finetune", "rl", "sft", "icrl_loop", "evaluate")
+STAGES = (
+    "demos",
+    "base_eval",
+    "constraint",
+    "finetune",
+    "rl",
+    "sft",
+    "icrl_loop",
+    "evaluate",
+)
 # The fine-tuning method: one of these stages runs, chosen by which block the config has.
 METHOD_STAGES = ("finetune", "rl", "sft", "icrl_loop")
 
@@ -81,7 +90,13 @@ def load_cfg(path: Path, overrides: list[str], smoke: bool):
             cfg = OmegaConf.merge(
                 cfg,
                 OmegaConf.create(
-                    {"finetune": {"rounds": 1, "max_pairs_per_round": 8, "pair_margin": 0.0}}
+                    {
+                        "finetune": {
+                            "rounds": 1,
+                            "max_pairs_per_round": 8,
+                            "pair_margin": 0.0,
+                        }
+                    }
                 ),
             )
         if "rl" in cfg:
@@ -92,8 +107,15 @@ def load_cfg(path: Path, overrides: list[str], smoke: bool):
             cfg = OmegaConf.merge(
                 cfg,
                 OmegaConf.create(
-                    {"icrl": {"rounds": 2, "grpo_steps_per_round": 2, "k": 2,
-                              "first_round_constraint_steps": 20, "constraint_steps": 10}}
+                    {
+                        "icrl": {
+                            "rounds": 2,
+                            "grpo_steps_per_round": 2,
+                            "k": 2,
+                            "first_round_constraint_steps": 20,
+                            "constraint_steps": 10,
+                        }
+                    }
                 ),
             )
         cfg.output.dir = str(Path(cfg.output.dir).parent / cfg.run_name)
@@ -296,14 +318,19 @@ def constraint_eval_on_tuned(cfg, out: Path) -> dict | None:
         reply_detector_eval,
     )
 
-    p, src = out / "constraint" / "eval_tuned.json", out / "eval" / "tuned_nominal.jsonl"
+    p, src = (
+        out / "constraint" / "eval_tuned.json",
+        out / "eval" / "tuned_nominal.jsonl",
+    )
     if p.exists():
         return json.loads(p.read_text())
     if not src.exists() or not (out / "constraint" / "constraint_meta.json").exists():
         return None
     model = StepConstraint.load(out / "constraint", device=cfg.constraint.get("device"))
     res = reply_detector_eval(model, load_rows(src))
-    log(f"constraint on TUNED nominal test replies (exact leak check as truth): {json.dumps(res)}")
+    log(
+        f"constraint on TUNED nominal test replies (exact leak check as truth): {json.dumps(res)}"
+    )
     p.write_text(json.dumps(res, indent=2))
     return res
 
@@ -428,15 +455,21 @@ def stage_rl(cfg, out: Path, smoke: bool) -> None:
     if state_p.exists() and json.loads(state_p.read_text()).get("method") == "grpo":
         log("rl: done already")
         return
-    if str(cfg.rl.get("cost", "learned")) == "learned" and not (
-        out / "constraint" / "constraint_meta.json"
-    ).exists():
-        raise RuntimeError("rl with the learned cost needs a trained constraint (run the constraint stage first)")
+    if (
+        str(cfg.rl.get("cost", "learned")) == "learned"
+        and not (out / "constraint" / "constraint_meta.json").exists()
+    ):
+        raise RuntimeError(
+            "rl with the learned cost needs a trained constraint (run the constraint stage first)"
+        )
     rdir = out / "rl"
     judge_cfg = OmegaConf.merge(
-        cfg, OmegaConf.create({"policy": {"serve": {"replicas": [str(cfg.rl.judge_gpu)]}}})
+        cfg,
+        OmegaConf.create({"policy": {"serve": {"replicas": [str(cfg.rl.judge_gpu)]}}}),
     )
-    run_cfg = OmegaConf.merge(cfg, OmegaConf.create({"rl": {"constraint_dir": str(out / "constraint")}}))
+    run_cfg = OmegaConf.merge(
+        cfg, OmegaConf.create({"rl": {"constraint_dir": str(out / "constraint")}})
+    )
     with served(judge_cfg, rdir, None) as servers:
         adapter = grpo_train(run_cfg, rdir, servers[0].base_url, log=log)
     hist_p = rdir / "train_log_history.json"
@@ -444,7 +477,6 @@ def stage_rl(cfg, out: Path, smoke: bool) -> None:
     state = {"method": "grpo", "adapter": str(adapter), "history": hist[-3:]}
     state_p.write_text(json.dumps(state, indent=2))
     log(f"rl: adapter {adapter}")
-
 
 
 def stage_sft(cfg, out: Path, smoke: bool) -> None:
@@ -459,9 +491,12 @@ def stage_sft(cfg, out: Path, smoke: bool) -> None:
     adapter = sft_train(cfg, out / "sft", rows, log=log)
     hist_p = out / "sft" / "train_log_history.json"
     hist = json.loads(hist_p.read_text()) if hist_p.exists() else []
-    state_p.write_text(json.dumps({"method": "sft", "adapter": str(adapter), "history": hist[-3:]}, indent=2))
+    state_p.write_text(
+        json.dumps(
+            {"method": "sft", "adapter": str(adapter), "history": hist[-3:]}, indent=2
+        )
+    )
     log(f"sft: adapter {adapter}")
-
 
 
 def phi_eval_on_test(cfg, out: Path, state: dict) -> dict | None:
@@ -476,13 +511,17 @@ def phi_eval_on_test(cfg, out: Path, state: dict) -> dict | None:
         reply_detector_eval,
     )
 
-    phi = ReplyFeasibility.load(Path(state["phi_dir"]), device=cfg.constraint.get("device"))
+    phi = ReplyFeasibility.load(
+        Path(state["phi_dir"]), device=cfg.constraint.get("device")
+    )
     res = {}
     for tag in ("base_nominal", "tuned_nominal"):
         src = out / "eval" / f"{tag}.jsonl"
         if src.exists():
             res[tag] = reply_detector_eval(phi, load_rows(src))
-            log(f"final phi cost on {tag} test replies (exact check as truth): {json.dumps(res[tag])}")
+            log(
+                f"final phi cost on {tag} test replies (exact check as truth): {json.dumps(res[tag])}"
+            )
     p.write_text(json.dumps(res, indent=2))
     return res
 
@@ -502,13 +541,16 @@ def stage_icrl_loop(cfg, out: Path, smoke: bool) -> None:
     from src.icrl_dual_training.secret_keeping_reply_constraint import (
         ReplyFeasibility,
         constraint_text,
-        maxent_round,
+        inverse_step,
     )
     from src.lagrangian_finetuning.secret_keeping_constrained_dpo import sample_replies
     from src.lagrangian_finetuning.secret_keeping_constrained_grpo import grpo_train
 
     state_p = out / "state.json"
-    if state_p.exists() and json.loads(state_p.read_text()).get("method") == "icrl_loop":
+    if (
+        state_p.exists()
+        and json.loads(state_p.read_text()).get("method") == "icrl_loop"
+    ):
         log("icrl_loop: done already")
         return
     ic, c, d, s = cfg.icrl, cfg.constraint, cfg.data, cfg.sampling
@@ -517,40 +559,70 @@ def stage_icrl_loop(cfg, out: Path, smoke: bool) -> None:
     st = (
         json.loads(loop_p.read_text())
         if loop_p.exists()
-        else {"round": 0, "adapter": None, "checkpoint": None,
-              "lambda": float(cfg.rl.dual.lambda_init), "phi_dir": None, "history": []}
+        else {
+            "round": 0,
+            "adapter": None,
+            "checkpoint": None,
+            "lambda": float(cfg.rl.dual.lambda_init),
+            "phi_dir": None,
+            "history": [],
+        }
     )
     rows = load_rows(out / "demos" / "rows.jsonl")
-    expert_texts = sorted(
-        {constraint_text(r, r["expert_replies"][r["expert_pick"]]) for r in rows
-         if r.get("expert_pick") is not None}
+    # one expert reply per chat that has one, in row order, so policy samples can be
+    # paired with their own chat's expert reply (same-chat ranking)
+    expert_rows = [r for r in rows if r.get("expert_pick") is not None]
+    expert_texts = [
+        constraint_text(r, r["expert_replies"][r["expert_pick"]]) for r in expert_rows
+    ]
+    expert_index = {r["id"]: i for i, r in enumerate(expert_rows)}
+    items = make_prompts(
+        "train", int(d.train_prompts), int(d.seed), float(d.attack_share)
     )
-    items = make_prompts("train", int(d.train_prompts), int(d.seed), float(d.attack_share))
-    log(f"icrl_loop: {K} rounds x {N} GRPO steps; {len(expert_texts)} expert replies; "
-        f"{len(items)} training chats, {int(ic.k)} policy samples each per round")
-    judge_cfg = OmegaConf.merge(cfg, OmegaConf.create({"policy": {"serve": {"replicas": [str(cfg.rl.judge_gpu)]}}}))
+    log(
+        f"icrl_loop: {K} rounds x {N} GRPO steps; {len(expert_texts)} expert replies; "
+        f"{len(items)} training chats, {int(ic.k)} policy samples each per round"
+    )
+    judge_cfg = OmegaConf.merge(
+        cfg,
+        OmegaConf.create({"policy": {"serve": {"replicas": [str(cfg.rl.judge_gpu)]}}}),
+    )
     while st["round"] < K:
         r = st["round"]
         rdir = out / f"icrl_round_{r:02d}"
         rdir.mkdir(parents=True, exist_ok=True)
-        log(f"=== ICRL round {r}: policy adapter={st['adapter']} lambda={st['lambda']:.3f} ===")
+        log(
+            f"=== ICRL round {r}: policy adapter={st['adapter']} lambda={st['lambda']:.3f} ==="
+        )
         # 1. sample the CURRENT policy (no reward filter: plain Malik nominal set)
         adapter = Path(st["adapter"]) if st["adapter"] else None
         with served(cfg, rdir, adapter) as servers:
             pol, _ = clients(cfg, servers, float(s.temperature))
             reps = sample_replies(items, pol, "nominal", int(ic.k), int(s.workers))
         samples = [
-            {"text": constraint_text(it, x), "kind": it["kind"],
-             "violates": leaks(x, it["secret"])}  # audit only, never trained on
-            for it, rs in zip(items, reps) for x in rs
+            {
+                "text": constraint_text(it, x),
+                "kind": it["kind"],
+                "id": it["id"],
+                "violates": leaks(x, it["secret"]),
+            }  # audit only, never trained on
+            for it, rs in zip(items, reps)
+            for x in rs
         ]
-        save_rows(rdir / "policy_samples.jsonl", [{**it, "replies": rs} for it, rs in zip(items, reps)])
+        save_rows(
+            rdir / "policy_samples.jsonl",
+            [{**it, "replies": rs} for it, rs in zip(items, reps)],
+        )
         # 2. inverse step: max-ent constraint update on phi, warm-started
-        phi = ReplyFeasibility.build(str(c.encoder_model), int(c.max_length), int(c.head_hidden),
-                                     device=c.get("device"))
+        phi = ReplyFeasibility.build(
+            str(c.encoder_model),
+            int(c.max_length),
+            int(c.head_hidden),
+            device=c.get("device"),
+        )
         if st["phi_dir"]:
             phi.load_head(st["phi_dir"])
-        e_cache = out / "icrl_expert_embeddings.pt"
+        e_cache = out / "icrl_expert_embeddings_by_chat.pt"
         if e_cache.exists():
             e_emb = torch.load(e_cache, map_location="cpu")
         else:
@@ -558,40 +630,82 @@ def stage_icrl_loop(cfg, out: Path, smoke: bool) -> None:
             torch.save(e_emb, e_cache)
         n_emb = phi.embed([x["text"] for x in samples]).cpu()
         mcfg = MaxEntConstraintConfig(
-            beta=float(ic.beta), sparsity_coeff=float(ic.sparsity_coeff),
+            beta=float(ic.beta),
+            sparsity_coeff=float(ic.sparsity_coeff),
             negative_selection=str(ic.negative_selection),
-            n_steps=int(ic.first_round_constraint_steps if r == 0 else ic.constraint_steps),
-            batch_trajectories=int(ic.constraint_batch), lr=float(ic.constraint_lr),
+            n_steps=int(
+                ic.first_round_constraint_steps if r == 0 else ic.constraint_steps
+            ),
+            batch_trajectories=int(ic.constraint_batch),
+            lr=float(ic.constraint_lr),
+            pucl_keep_fraction=float(ic.get("pucl_keep_fraction", 0.3)),
+            pucl_k=int(ic.get("pucl_k", 2)),
+            batch_steps=int(ic.constraint_batch),
         )
-        cstats = maxent_round(phi, e_emb, n_emb, mcfg)
+        pair_idx = torch.tensor([expert_index.get(x["id"], -1) for x in samples])
+        mem_p = out / "icrl_pucl_memory.pt"
+        memory = torch.load(mem_p, map_location="cpu") if mem_p.exists() else None
+        cstats, memory = inverse_step(
+            phi, e_emb, n_emb, pair_idx, ic, mcfg, memory=memory
+        )
+        if memory is not None:
+            torch.save(memory, mem_p)
         costs = phi.costs_from_embeddings(n_emb)
         audit = reply_detector_eval_from_costs(samples, costs)
         phi_dir = rdir / "phi"
         phi.save(phi_dir)
         log(f"round {r} inverse step: {json.dumps(cstats)}")
-        log(f"round {r} phi on this round's policy samples (exact check as truth, audit only): {json.dumps(audit)}")
+        log(
+            f"round {r} phi on this round's policy samples (exact check as truth, audit only): {json.dumps(audit)}"
+        )
         del phi, e_emb, n_emb
         gc.collect()
         torch.cuda.empty_cache()
         # 3+4. forward step: GRPO resumed from the last round, lambda by dual ascent
-        run_cfg = OmegaConf.merge(cfg, OmegaConf.create({"rl": {
-            "cost": "maxent_feasibility", "phi_dir": str(phi_dir),
-            "max_steps": (r + 1) * N, "save_steps": N,
-            "resume_from_checkpoint": st["checkpoint"], "lambda_init": st["lambda"],
-        }}))
+        run_cfg = OmegaConf.merge(
+            cfg,
+            OmegaConf.create(
+                {
+                    "rl": {
+                        "cost": "maxent_feasibility",
+                        "phi_dir": str(phi_dir),
+                        "max_steps": (r + 1) * N,
+                        "save_steps": N,
+                        "resume_from_checkpoint": st["checkpoint"],
+                        "lambda_init": st["lambda"],
+                    }
+                }
+            ),
+        )
         with served(judge_cfg, rdir, None) as servers:
             adapter_dir = grpo_train(run_cfg, rdir / "rl", servers[0].base_url, log=log)
         lam = json.loads((rdir / "rl" / "lambda.json").read_text())["lambda"]
         hist_p = rdir / "rl" / "train_log_history.json"
         tail = json.loads(hist_p.read_text())[-N:] if hist_p.exists() else []
-        st["history"].append({"round": r, "inverse": cstats, "phi_audit": audit,
-                              "lambda_end": lam, "grpo_tail": tail[-3:]})
+        st["history"].append(
+            {
+                "round": r,
+                "inverse": cstats,
+                "phi_audit": audit,
+                "lambda_end": lam,
+                "grpo_tail": tail[-3:],
+            }
+        )
         st.update(round=r + 1, adapter=str(adapter_dir), phi_dir=str(phi_dir))
         st["lambda"] = lam
         st["checkpoint"] = str(rdir / "rl" / "trainer" / f"checkpoint-{(r + 1) * N}")
         loop_p.write_text(json.dumps(st, indent=2))
-    state_p.write_text(json.dumps({"method": "icrl_loop", "adapter": st["adapter"],
-                                   "phi_dir": st["phi_dir"], "history": st["history"]}, indent=2))
+    state_p.write_text(
+        json.dumps(
+            {
+                "method": "icrl_loop",
+                "adapter": st["adapter"],
+                "phi_dir": st["phi_dir"],
+                "history": st["history"],
+            },
+            indent=2,
+        )
+    )
     log(f"icrl_loop: done, final adapter {st['adapter']}")
 
 
@@ -599,15 +713,41 @@ def reply_detector_eval_from_costs(samples: list[dict], costs: list[float]) -> d
     """AUROC of cost vs the exact check over already-scored samples (audit only)."""
     from src.icrl_dual_training.machiavelli_step_constraint import auroc
 
+    from src.icrl_dual_training.machiavelli_step_constraint import within_state_accuracy
+
     labels = [x["violates"] for x in samples]
     att = [i for i, x in enumerate(samples) if x["kind"] == "attack"]
     nv = sum(labels)
+    att_labels = [labels[i] for i in att]
+    by_chat: dict = {}
+    for x in samples:
+        by_chat.setdefault(x.get("id"), []).append(x["violates"])
+    rows = [
+        {
+            "state": x.get("id"),
+            "violates": x["violates"],
+            "state_kind": "mixed"
+            if 0 < sum(by_chat[x.get("id")]) < len(by_chat[x.get("id")])
+            else "uniform",
+        }
+        for x in samples
+    ]
     return {
         "n": len(samples),
         "violation_rate_attack": sum(labels[i] for i in att) / max(1, len(att)),
         "auroc_all": auroc(costs, labels) if 0 < nv < len(labels) else None,
-        "mean_cost_violating": sum(cc for cc, l in zip(costs, labels) if l) / max(1, nv),
-        "mean_cost_safe": sum(cc for cc, l in zip(costs, labels) if not l) / max(1, len(labels) - nv),
+        # the numbers that matter for GRPO: does the cost separate replies INSIDE attack chats?
+        "auroc_attack_chats": auroc([costs[i] for i in att], att_labels)
+        if 0 < sum(att_labels) < len(att_labels)
+        else None,
+        "within_chat_violating_above_safe": within_state_accuracy(rows, costs)
+        if "id" in samples[0]
+        else None,
+        "mean_cost_attack": sum(costs[i] for i in att) / max(1, len(att)),
+        "mean_cost_violating": sum(cc for cc, l in zip(costs, labels) if l)
+        / max(1, nv),
+        "mean_cost_safe": sum(cc for cc, l in zip(costs, labels) if not l)
+        / max(1, len(labels) - nv),
     }
 
 
@@ -676,15 +816,20 @@ def main() -> int:
 
     if a.stages is None:
         method = (
-            "icrl_loop" if "icrl" in cfg
-            else "rl" if "rl" in cfg
-            else "sft" if "sft" in cfg
+            "icrl_loop"
+            if "icrl" in cfg
+            else "rl"
+            if "rl" in cfg
+            else "sft"
+            if "sft" in cfg
             else "finetune"
         )
         # the icrl loop learns its own constraint; the one-shot classifier stage is not part of it
         skip = {"constraint"} if method == "icrl_loop" else set()
         a.stages = ",".join(
-            x for x in STAGES if (x not in METHOD_STAGES or x == method) and x not in skip
+            x
+            for x in STAGES
+            if (x not in METHOD_STAGES or x == method) and x not in skip
         )
     stages = [s for s in a.stages.split(",") if s]
     unknown = sorted(set(stages) - set(STAGES))

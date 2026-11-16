@@ -411,6 +411,7 @@ def pucl_constraint_update(
     cfg: MaxEntConstraintConfig,
     memory: torch.Tensor | None = None,
     optimizer: torch.optim.Optimizer | None = None,
+    expand: bool = True,
 ) -> tuple[dict, torch.Tensor]:
     """PUCL Eq. 5: cross-entropy on demonstrations against reliable negatives.
 
@@ -423,7 +424,7 @@ def pucl_constraint_update(
         head.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay
     )
     idx = reliable_infeasible_steps(
-        expert, nominal, percentile=cfg.pucl_keep_fraction, k=cfg.pucl_k
+        expert, nominal, percentile=cfg.pucl_keep_fraction, k=cfg.pucl_k, expand=expand
     )
     neg = nominal.embeddings[idx]
     if memory is not None and memory.numel():
