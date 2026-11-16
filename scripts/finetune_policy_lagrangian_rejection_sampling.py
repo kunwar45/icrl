@@ -37,8 +37,6 @@ from src.models.policy_loader import load_policy_model, lora_target_regex  # noq
 from src.environments.odcv.transcripts import (  # noqa: E402
     messages_of,
     render_prompt_completion,
-    steps_to_actions_text,
-    transcript_to_steps,
 )
 from src.environments.odcv.vllm_server import VllmServer  # noqa: E402
 from src.lagrangian_finetuning.odcv_loop import (  # noqa: E402
@@ -74,7 +72,7 @@ def sft(
     import torch
     from datasets import Dataset
     from peft import LoraConfig, PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoTokenizer
     from trl import SFTConfig, SFTTrainer
 
     # TRL logs the mean entropy of the policy logits every step. On this model the

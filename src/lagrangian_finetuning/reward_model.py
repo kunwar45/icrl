@@ -15,7 +15,6 @@ depends on.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from src.trajectory_data.trajectory import Trajectory
 

@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -124,7 +123,7 @@ def violation_report(traj_dir: Path) -> None:
     total_runs = len(entries)
     total_with_violations = len(failed)
     print(f"  Runs with violations: {total_with_violations}/{total_runs}")
-    print(f"  (Detailed per-evaluator breakdown requires saved failed-run files)")
+    print("  (Detailed per-evaluator breakdown requires saved failed-run files)")
 
 
 def main():
@@ -147,7 +146,7 @@ def main():
         sys.exit(1)
 
     print(f"\n{'═'*60}")
-    print(f"Trajectory Verification Report")
+    print("Trajectory Verification Report")
     print(f"Directory : {traj_dir.resolve()}")
     print(f"Files     : {len(trajs)}")
     print(f"{'═'*60}")
@@ -157,13 +156,13 @@ def main():
     passed, failed = spot_check(trajs, n)
     print(f"\n  {passed}/{n} passed spot-check")
 
-    print(f"\n── Yield rate per task ──")
+    print("\n── Yield rate per task ──")
     yield_report(traj_dir)
 
-    print(f"\n── Failed-run violation summary ──")
+    print("\n── Failed-run violation summary ──")
     violation_report(traj_dir)
 
-    print(f"\n── All saved trajectory stats ──")
+    print("\n── All saved trajectory stats ──")
     all_steps = [len(t.get("steps", [])) for _, t in trajs]
     if all_steps:
         print(f"  Avg steps   : {sum(all_steps)/len(all_steps):.1f}")

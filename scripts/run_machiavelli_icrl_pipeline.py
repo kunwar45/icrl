@@ -26,6 +26,13 @@ is kept when the actor's pick is an avoidable violation and the expert's is a
 different, clean option; C_theta then trains on the matched rows (paired_bce).
 demos.shard = "i/n" splits games.demo across jobs, one file per shard.
 
+With demos.mode = oracle_expert, the expert is an oracle that knows the true
+constraint: at a decision scene (some option harmful, some harmless) it takes the
+harmless option with the highest estimated return, elsewhere the policy's own
+pick drives the game. At each decision scene the policy (demos.policy_kind) is
+also sampled demos.policy_samples times; those picks are the unsafe demos,
+filtered by constraint.pair_filter without reading harm labels.
+
 prompt_check (only when named in --stages) plays prompt_check.kinds on a few
 training games and prints each kind's ground-truth rates plus 5 example steps.
 
@@ -39,12 +46,10 @@ the exact model input, output and ground-truth verdict for 5 steps per arm.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import os
 import random
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -146,55 +151,12 @@ def demo_shard(cfg) -> tuple[int, int]:
     return int(i), int(n)
 
 
-@contextlib.contextmanager
 def served(cfg, out_dir: Path, adapter: Path | None):
-    """Start one vLLM server per replica GPU group, concurrently; yield the list."""
-    from src.environments.odcv.vllm_server import VllmServer
+    """One vLLM server per replica GPU group (src.utils.vllm_replica_serving)."""
+    from src.utils.vllm_replica_serving import served as serve_replicas
 
-    s = cfg.policy.serve
-    replicas = list(s.get("replicas") or [str(s.gpus)])
-    servers = [
-        VllmServer(
-            str(cfg.policy.model),
-            lora_path=str(adapter) if adapter else None,
-            lora_name="policy",
-            tensor_parallel=int(s.tensor_parallel),
-            gpus=str(g),
-            port=8000 + 10 * i,
-            max_model_len=int(s.max_model_len),
-            max_num_seqs=int(s.max_num_seqs),
-            gpu_fraction=float(s.gpu_fraction),
-            log_path=out_dir / f"vllm_{i}.log",
-            max_lora_rank=max(64, int(cfg.finetune.lora_r)),
-            reasoning_parser=s.reasoning_parser,
-            tool_call_parser=s.tool_call_parser,
-        )
-        for i, g in enumerate(replicas)
-    ]
-    errors: list[BaseException] = []
+    return serve_replicas(cfg, out_dir, adapter, log=log)
 
-    def start(srv):
-        try:
-            srv.start()
-        except BaseException as e:  # noqa: BLE001 - re-raised below
-            errors.append(e)
-
-    t0 = time.time()
-    threads = [threading.Thread(target=start, args=(srv,)) for srv in servers]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    try:
-        if errors:
-            raise errors[0]
-        log(
-            f"{len(servers)} vLLM server(s) up in {time.time() - t0:.0f}s on GPU groups {replicas}"
-        )
-        yield servers
-    finally:
-        for srv in servers:
-            srv.stop()
 
 
 def make_policy(servers, temperature: float):
@@ -220,6 +182,7 @@ def collect(
     *,
     option_returns=None,
     expert_kind=None,
+    oracle_expert=None,
     max_steps=None,
 ):
     from src.environments.machiavelli.rollout_collector import collect_episodes
@@ -233,6 +196,7 @@ def collect(
         workers=int(cfg.rollouts.workers),
         option_returns=option_returns,
         expert_kind=expert_kind,
+        oracle_expert=oracle_expert,
         log=log,
     )
 
@@ -276,6 +240,8 @@ def stage_demos(cfg, out: Path, smoke: bool) -> None:
 
     if cfg.get("demos") and cfg.demos.get("mode") == "paired":
         return stage_paired_demos(cfg, out, smoke)
+    if cfg.get("demos") and cfg.demos.get("mode") == "oracle_expert":
+        return stage_oracle_expert_demos(cfg, out, smoke)
     if (out / "demos" / "summary.json").exists():
         log("demos: done already")
         return
@@ -333,6 +299,83 @@ def stage_paired_demos(cfg, out: Path, smoke: bool) -> None:
         show_paired_examples(
             f"paired demos, actor '{d.actor_kind}' / expert '{d.expert_kind}'", eps
         )
+
+
+def show_oracle_examples(title: str, episodes: list[dict], n: int = 5) -> None:
+    """Print n decision scenes: the prompt the policy saw, its samples, the oracle's pick, returns and ground truth."""
+    from src.icrl_dual_training.machiavelli_step_constraint import (
+        PAIR_FILTERS,
+        oracle_pair_actions,
+    )
+
+    steps = [(e, s) for e in episodes for s in e["steps"] if s["oracle"]][:n]
+    print(f"\n{'=' * 30} {title}: {len(steps)} decision scenes {'=' * 30}", flush=True)
+    for e, s in steps:
+        print(f"--- {e['game']} seed {e['seed']} step {s['t']} ---")
+        print("[POLICY SYSTEM PROMPT]\n" + s["system"])
+        print("[USER PROMPT]\n" + s["user"])
+        print(f"[POLICY SAMPLES] {s['policy_responses']!r} -> {s['policy_actions']}")
+        print(f"[ORACLE EXPERT PICK] {s['action']} (game steps with this)")
+        print("[ESTIMATED RETURNS] " + str([round(r, 2) for r in s["option_returns"]]))
+        print(f"[GROUND TRUTH PER-OPTION HARMS] {s['option_harms']}")
+        for f in PAIR_FILTERS:
+            print(f"[UNSAFE DEMOS, filter {f}] {oracle_pair_actions(s, f)}")
+    print(flush=True)
+
+
+def stage_oracle_expert_demos(cfg, out: Path, smoke: bool) -> None:
+    """Oracle-expert episodes on this shard's demo games; pair counts per filter in the summary."""
+    from src.environments.machiavelli.rollout_collector import (
+        episode_metrics,
+        save_episodes,
+    )
+    from src.icrl_dual_training.machiavelli_step_constraint import (
+        PAIR_FILTERS,
+        oracle_pair_actions,
+    )
+
+    i, n = demo_shard(cfg)
+    summary_p = out / "demos" / f"oracle_summary_shard{i}.json"
+    if summary_p.exists():
+        log(f"oracle-expert demos shard {i}/{n}: done already")
+        return
+    games = list(cfg.games.demo)[i::n]
+    d = cfg.demos
+    log(
+        f"oracle-expert demos shard {i}/{n}: {len(games)} games x {len(cfg.rollouts.demo_seeds)} seeds, "
+        f"policy prompt={d.policy_kind}, {d.policy_samples} policy samples per decision scene"
+    )
+    with served(cfg, out / "demos", None) as servers:
+        eps = collect(
+            cfg,
+            make_policy(servers, float(cfg.rollouts.temperature)),
+            games,
+            cfg.rollouts.demo_seeds,
+            str(d.policy_kind),
+            oracle_expert={
+                "policy_samples": int(d.policy_samples),
+                "option_returns": dict(d.option_returns),
+            },
+        )
+    save_episodes(out / "demos" / f"oracle_shard{i}.jsonl", eps)
+    summary = episode_metrics(eps)
+    steps = [s for e in eps for s in e["steps"]]
+    for f in PAIR_FILTERS:
+        kept = [(s, a) for s in steps for a in oracle_pair_actions(s, f)]
+        # Ground truth, for reporting only: the share of unsafe demos that are harmful.
+        summary[f"pairs_{f}"] = {
+            "pairs": len(kept),
+            "scenes_with_a_pair": sum(bool(oracle_pair_actions(s, f)) for s in steps),
+            "unsafe_pick_is_harmful": sum(bool(s["option_harms"][a]) for s, a in kept)
+            / max(1, len(kept)),
+        }
+    summary["games"] = games
+    summary_p.write_text(json.dumps(summary, indent=2))
+    log(
+        f"oracle-expert demos shard {i}/{n}: {json.dumps({k: v for k, v in summary.items() if k != 'games'})}"
+    )
+    if smoke:
+        show_oracle_examples(f"oracle-expert demos, policy '{d.policy_kind}'", eps)
 
 
 def stage_prompt_check(cfg, out: Path) -> None:
@@ -422,6 +465,7 @@ def stage_constraint(cfg, out: Path) -> None:
     from src.environments.machiavelli.rollout_collector import load_episodes
     from src.icrl_dual_training.machiavelli_step_constraint import (
         demo_steps,
+        oracle_demo_steps,
         paired_demo_steps,
         train_step_constraint,
     )
@@ -442,6 +486,19 @@ def stage_constraint(cfg, out: Path) -> None:
         expert, unsafe = paired_demo_steps(eps, scene_chars=sc)
         log(
             f"constraint: {len(expert)} matched same-scene pairs from {len(eps)} paired episodes"
+        )
+    elif cfg.get("demos") and cfg.demos.get("mode") == "oracle_expert":
+        _, n = demo_shard(cfg)
+        shards = [out / "demos" / f"oracle_shard{i}.jsonl" for i in range(n)]
+        missing = [p.name for p in shards if not p.exists()]
+        if missing:
+            raise RuntimeError(f"oracle-expert demo shards missing: {missing}")
+        eps = [e for p in shards for e in load_episodes(p)]
+        f = str(cfg.constraint.pair_filter)
+        expert, unsafe = oracle_demo_steps(eps, pair_filter=f, scene_chars=sc)
+        log(
+            f"constraint: {len(expert)} oracle-expert / policy same-scene pairs "
+            f"(filter {f}) from {len(eps)} episodes"
         )
     else:
         expert, unsafe = demo_steps(

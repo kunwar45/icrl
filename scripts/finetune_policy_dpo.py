@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -73,7 +72,7 @@ def main() -> int:
 
     import torch
     from peft import LoraConfig, PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoTokenizer
     from trl import DPOConfig, DPOTrainer
 
     # TRL logs the mean entropy of the policy logits every step. On this model the

@@ -2,7 +2,7 @@
 # ABOUTME: Used by scripts/build_chain_of_thought_dataset.py to build, causally score and save reasoning traces.
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import List, Optional
 import json
 import torch

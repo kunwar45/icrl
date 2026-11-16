@@ -203,7 +203,6 @@ def test_held_out_tasks_are_chosen_once_for_both_labels():
     splits = _load_splits_module()
     assert hasattr(splits, "_choose_held_out_tasks")
     assert hasattr(splits, "apply_split")
-    rng = random.Random(0)
     held = {"t2"}
     rows = [{"task_instance_id": "t1"}, {"task_instance_id": "t2"}]
     train, heldout, train_ids, held_ids = splits.apply_split(rows, held)

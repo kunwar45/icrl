@@ -1,0 +1,230 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; background: #f6f7fa; }
+    a { color: #2b45c4; text-decoration: none; }
+    a:hover { color: #1c2f96; }
+    .b { margin: 0; font-family: 'Space Grotesk','Helvetica Neue',Arial,sans-serif;
+         font-size: 26px; line-height: 1.46; color: #2c3039; text-wrap: pretty; }
+    .b strong { font-weight: 600; color: #12141b; }
+    .cap { margin: 0; font-family: 'Space Grotesk','Helvetica Neue',Arial,sans-serif;
+           font-size: 21px; line-height: 1.4; color: #6b6f7a; text-wrap: pretty; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+    .h2 { margin: 0; font-family: 'Space Grotesk','Helvetica Neue',Arial,sans-serif;
+          font-size: 40px; font-weight: 600; letter-spacing: -0.014em; line-height: 1.05; color: #12141b; }
+    .rule { display: flex; align-items: center; gap: 16px; border-bottom: 4px solid #12141b; padding-bottom: 10px; }
+    .num { font-family: 'JetBrains Mono',ui-monospace,Menlo,monospace; font-size: 23px; font-weight: 700;
+           color: #f6f7fa; width: 44px; height: 44px; flex: none; display: inline-flex;
+           align-items: center; justify-content: center; }
+    .sec { display: flex; flex-direction: column; gap: 15px; }
+    .lbl { font-family: 'JetBrains Mono',ui-monospace,Menlo,monospace; font-size: 19px;
+           font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: #6b6f7a; }
+    .row { display: flex; gap: 24px; padding: 9px 0; border-bottom: 2px solid #d8dbe4; }
+    .rowlbl { flex: none; width: 244px; font-size: 18px; padding-top: 4px; }
+  </style>
+</helmet>
+
+<div style="width: 2304px; height: 3456px; box-sizing: border-box; padding: 76px 88px 66px; background: #f6f7fa; display: flex; flex-direction: column; font-family: 'Space Grotesk','Helvetica Neue',Arial,sans-serif; color: #12141b;">
+
+  <!-- ═════════ TITLE ═════════ -->
+  <header style="display: flex; gap: 56px; align-items: flex-start; border-bottom: 7px solid #12141b; padding-bottom: 18px;">
+    <div style="flex: 1;">
+      <div class="lbl" style="font-size: 22px; color: {{accent}}; margin-bottom: 16px;">I-CUREUS capstone poster · Summer 2026 · AI safety</div>
+      <h1 style="margin: 0 0 20px; font-family: 'Syne','Helvetica Neue',Arial,sans-serif; font-weight: 800; font-size: 78px; line-height: 1.05; letter-spacing: -0.032em; color: #12141b; text-wrap: balance;">
+        Can a model learn what<br>makes an action unsafe?
+      </h1>
+      <div style="font-size: 33px; font-weight: 600; color: #12141b;">Kunwar Nir<span style="font-weight: 400; color: #6b6f7a;">&nbsp;&nbsp;·&nbsp;&nbsp;Carleton University, Ottawa</span></div>
+      <div class="cap" style="font-size: 24px; margin-top: 7px;">Supervised by [SUPERVISOR]&nbsp;&nbsp;·&nbsp;&nbsp;Teaching and Learning Services, I-CUREUS</div>
+    </div>
+    <div style="flex: none; width: 168px; height: 168px; border: 4px solid #12141b; display: flex; align-items: center; justify-content: center; text-align: center; box-sizing: border-box; background: #eaedf4;">
+      <span class="cap" style="font-size: 19px; color: #4c515c;">[QR CODE]<br>code + data</span>
+    </div>
+  </header>
+
+  <!-- ═════════ SUMMARY / WHAT I DID ═════════ -->
+  <div style="margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 34px;">
+    <div style="background: #eaedf4; border-top: 8px solid {{accent}}; padding: 19px 24px;">
+      <div class="lbl" style="font-size: 20px; color: {{accent}}; margin-bottom: 9px;">Summary</div>
+      <p class="b" style="font-size: 28px;">An AI agent acting in the world needs some way to tell harmful actions from harmless ones. Rather than write that rule by hand, I tried to learn it from 683 safe and 611 unsafe robot demonstrations in a simulated household. On tasks it had never seen the learned score reached an AUROC of 0.547. Counting a demonstration's steps reached 0.635.</p>
+    </div>
+    <div style="background: #eaedf4; border-top: 8px solid #12141b; padding: 19px 24px;">
+      <div class="lbl" style="font-size: 20px; color: #12141b; margin-bottom: 9px;">What I did</div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <p class="b" style="font-size: 25px;"><span class="mono" style="color: {{accent}};">1.</span> Built a pipeline that generates robot demonstrations in the AI2-THOR simulator and verifies each against the simulator's object states.</p>
+        <p class="b" style="font-size: 25px;"><span class="mono" style="color: {{accent}};">2.</span> Produced a verified dataset of 683 safe and 611 unsafe demonstrations across 159 household tasks.</p>
+        <p class="b" style="font-size: 25px;"><span class="mono" style="color: {{accent}};">3.</span> Set up an evaluation that scores the model against simple baselines on the same data, which is what caught the failure.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════ FOUR SECTIONS, ROW-ALIGNED ═════════ -->
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 72px; row-gap: 30px; align-items: start; margin-top: 30px;">
+
+    <section class="sec">
+      <div class="rule"><span class="num" style="background: {{accent}};">1</span><h2 class="h2">The problem</h2></div>
+      <p class="b">AI agents can now carry out long sequences of physical steps on their own. Some of those steps cause harm: a knife into a blender, a stove left switched on. Writing a rule for every harmful action by hand does not scale.</p>
+      <p class="b">Inverse Constraint Reinforcement Learning offers another route. Show the system safe demonstrations next to unsafe ones and let it learn a cost function <span class="mono" style="font-size: 25px;">C<sub>θ</sub></span> from the contrast. Training then pursues task reward R while holding that cost down.</p>
+      <div style="background: #eaedf4; border-top: 3px solid #12141b; border-bottom: 3px solid #12141b; padding: 14px 24px; text-align: center;">
+        <div class="mono" style="font-size: 34px; font-weight: 600; color: #12141b;">maximize&nbsp; R(τ) − λ · C<sub>θ</sub>(τ)</div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 7px; margin-top: 3px;">
+        <div style="border: 3px solid #12141b; padding: 11px 16px; display: flex; justify-content: space-between; align-items: baseline;">
+          <span style="font-size: 26px; font-weight: 600;"><span class="mono" style="font-size: 31px;">683</span> safe demonstrations</span>
+          <span style="font-size: 26px; font-weight: 600; color: {{hazard}};"><span class="mono" style="font-size: 31px;">611</span> unsafe</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <svg width="20" height="28" viewBox="0 0 26 40" fill="none" aria-hidden="true"><path d="M13 0v32M4 24l9 10 9-10" stroke="#12141b" stroke-width="4" stroke-linecap="square"/></svg>
+          <span class="lbl" style="font-size: 19px;">learn from the contrast</span>
+        </div>
+        <div style="border: 3px solid #12141b; background: #eaedf4; padding: 11px 16px;">
+          <div style="font-size: 28px; font-weight: 600;"><span class="mono">C<sub>θ</sub></span>, a scoring head on a frozen text encoder</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <svg width="20" height="28" viewBox="0 0 26 40" fill="none" aria-hidden="true"><path d="M13 0v32M4 24l9 10 9-10" stroke="{{hazard}}" stroke-width="4" stroke-linecap="square"/></svg>
+          <span class="lbl" style="font-size: 19px; color: {{hazard}};">test on unseen tasks</span>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" stroke="{{hazard}}" stroke-width="4" stroke-linecap="round"/></svg>
+          <span class="lbl" style="font-size: 19px; color: {{hazard}};">never passed</span>
+        </div>
+        <div style="border: 3px dashed #adb2bf; padding: 11px 16px;">
+          <div style="font-size: 28px; font-weight: 600; color: #8e93a1;">fine-tune the agent against C<sub>θ</sub></div>
+        </div>
+      </div>
+      <p class="cap"><strong style="color: #4c515c;">Figure 1.</strong> The pipeline, and where it stops.</p>
+    </section>
+
+    <section class="sec">
+      <div class="rule"><span class="num" style="background: {{accent}};">3</span><h2 class="h2">Checking against simple baselines</h2></div>
+      <p class="b">A learned score is only interesting if it beats things that took no learning at all. Before looking at <span class="mono" style="font-size: 25px;">C<sub>θ</sub></span> I measured what four trivial signals achieve on the same held-out demonstrations. If one of them already separates safe from unsafe, then a learned score matching it has shown nothing.</p>
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;">
+        <div style="border: 2px solid #d8dbe4; padding: 12px 14px;"><div class="lbl" style="font-size: 17px;">Steps</div><div class="mono" style="font-size: 30px; font-weight: 600;">0.635</div></div>
+        <div style="border: 2px solid #d8dbe4; padding: 12px 14px;"><div class="lbl" style="font-size: 17px;">Break</div><div class="mono" style="font-size: 30px; font-weight: 600;">0.596</div></div>
+        <div style="border: 2px solid #d8dbe4; padding: 12px 14px;"><div class="lbl" style="font-size: 17px;">Reward</div><div class="mono" style="font-size: 30px; font-weight: 600;">0.500</div></div>
+        <div style="border: 2px solid #d8dbe4; padding: 12px 14px;"><div class="lbl" style="font-size: 17px;">No-op</div><div class="mono" style="font-size: 30px; font-weight: 600;">0.490</div></div>
+      </div>
+      <p class="b">This turned out to matter. My first evaluation gave the learned score an AUROC of 0.824, which read as a clear success. Counting steps gave 0.806 on the very same demonstrations.</p>
+      <div style="border: 4px solid {{hazard}}; background: #fceeea; padding: 20px 24px;">
+        <p class="b" style="font-size: 29px; color: #12141b;">Without the baseline, I would have reported a working safety score and moved on to fine-tuning against it.</p>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="rule"><span class="num" style="background: {{accent}};">2</span><h2 class="h2">Setup</h2></div>
+      <div style="display: flex; flex-direction: column;">
+        <div class="row"><span class="lbl rowlbl">Environment</span><p class="b" style="font-size: 25px;">AI2-THOR, a simulated household. The SafeAgentBench task set supplies 299 hazardous and 299 benign tasks over 84 scenes, and runs at 45.8 actions per second with no display attached.</p></div>
+        <div class="row"><span class="lbl rowlbl">Ground truth</span><p class="b" style="font-size: 25px;">The simulator's own object states: <span class="mono" style="font-size: 22px;">isBroken</span>, <span class="mono" style="font-size: 22px;">isToggled</span>, <span class="mono" style="font-size: 22px;">isSliced</span>, <span class="mono" style="font-size: 22px;">isFilledWithLiquid</span>. I do not use the benchmark's language-model scorer.</p></div>
+        <div class="row"><span class="lbl rowlbl">Demonstrations</span><p class="b" style="font-size: 25px;">Generated by Qwen2.5-32B-Instruct on four L40S GPUs, the same model for both classes, 5 to 10 demonstrations per task.</p></div>
+        <div class="row"><span class="lbl rowlbl">Held-out split</span><p class="b" style="font-size: 25px;">By task, chosen once and applied to both classes. Two demonstrations of one task look almost identical, so splitting by demonstration would leak the test set into training.</p></div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="rule"><span class="num" style="background: {{accent}};">4</span><h2 class="h2">What I ruled out</h2></div>
+      <div style="display: flex; flex-direction: column;">
+        <div class="row"><span class="lbl rowlbl">Data quality</span><p class="b" style="font-size: 25px;">Three passes over the first 700 demonstrations found six silent bugs, among them 132 interrupted hazards recorded as refusals. I fixed all six and regenerated everything. The result did not move.</p></div>
+        <div class="row"><span class="lbl rowlbl">Hidden shortcuts</span><p class="b" style="font-size: 25px;">Length, reward, no-ops and contamination between splits are all closed. The encoder had been handed the text <span class="mono" style="font-size: 22px;">Task &lt;id&gt;</span> as a fallback, which scored 0.80 on its own. I removed it.</p></div>
+        <div class="row"><span class="lbl rowlbl">Model capacity</span><p class="b" style="font-size: 25px;">A regularized version of the scoring head reached 0.438, so the model is not too small for the job.</p></div>
+        <div class="row"><span class="lbl rowlbl">Task variety</span><p class="b" style="font-size: 25px;">At 21 usable benign tasks the score reached 0.828 on training tasks and 0.511 on held-out ones, so it had memorized the task list. I widened the verifiable pool from 237 to 523 and tripled the expert count from 52 to 159. The result did not move.</p></div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ═════════ RESULTS ═════════ -->
+  <section style="margin-top: 28px; display: flex; flex-direction: column; gap: 15px;">
+    <div class="rule" style="border-bottom-width: 5px;">
+      <span class="num" style="background: {{accent}}; font-size: 26px; width: 50px; height: 50px;">5</span>
+      <h2 class="h2" style="font-size: 46px;">Results</h2>
+      <span class="cap" style="font-size: 22px; margin-left: auto;">AUROC on tasks held out by task. Unsafe demonstrations are the positive class.</span>
+    </div>
+    <svg width="2128" height="634" viewBox="0 0 2128 634" role="img" aria-label="Grouped bar chart comparing the learned safety score against the strongest trivial baseline across four evaluation splits">
+      <g font-family="'JetBrains Mono', Menlo, monospace" font-size="22" fill="#858a97">
+        <text x="520" y="28" text-anchor="middle">0.50</text>
+        <text x="834" y="28" text-anchor="middle">0.60</text>
+        <text x="1149" y="28" text-anchor="middle">0.70</text>
+        <text x="1463" y="28" text-anchor="middle">0.80</text>
+      </g>
+      <g stroke="#d8dbe4" stroke-width="2"><line x1="834" y1="40" x2="834" y2="572"/><line x1="1149" y1="40" x2="1149" y2="572"/><line x1="1463" y1="40" x2="1463" y2="572"/></g>
+      <line x1="520" y1="36" x2="520" y2="580" stroke="#12141b" stroke-width="3"/>
+      <text x="510" y="608" text-anchor="end" font-family="'Space Grotesk', 'Helvetica Neue', Arial, sans-serif" font-size="21" fill="#858a97">chance = 0.50</text>
+      <text x="0" y="88" font-family="'Space Grotesk', 'Helvetica Neue', Arial, sans-serif" font-size="30" font-weight="600" fill="#12141b">All demonstrations</text>
+      <text x="0" y="118" font-family="'Space Grotesk', 'Helvetica Neue', Arial, sans-serif" font-size="20" fill="#858a97">first pass, 52 tasks</text>
+      <rect x="520" y="56" width="1018" height="44" fill="{{accent}}"/>
+      <rect x="520" y="110" width="962" height="44" fill="#a4a9b6"/>
+      <text x="1556" y="89" font-family="'JetBrains Mono', Menlo, monospace" font-size="31" font-weight="600" fill="#12141b">0.824</text>
+      <text x="1500" y="143" font-family="'JetBrains Mono', Menlo, monospace" font-size="28" font-weight="400" fill="#6b6f7a">0.806</text>
+      <text x="2128" y="118" text-anchor="end" font-family="'JetBrains Mono', Menlo, monospace" font-size="34" font-weight="600" fill="#858a97">+0.018</text>
+      <text x="0" y="224" font-family="'Space Grotesk', 'Helvetica Neue', Arial, sans-serif" font-size="30" font-weight="600" fill="#12141b">Refusals removed</text>
+      <text x="0" y="254" font-family="'Space Grotesk', 'Helvetica Neue', Arial, sans-serif" font-size="20" fill="#858a97">length and reward evened out</text>
+      <rect x="520" y="192" width="374" height="44" fill="{{accent}}"/>
+      <rect x="520" y="246" width="170" height="44" fill="#a4a9b6"/>
+      <text x="912" y="225" font-family="'JetBrains Mono', Menlo, monospace" font-size="31" font-weight="600" fill="#12141b">0.619</text>
+      <text x="708" y="279" font-family="'JetBrains Mono', Menlo, monospace" font-size="28" font-weight="400" fill="#6b6f7a">0.554</text>
+      <text x="2128" y="254" text-anchor="end" font-family="'JetBrains Mono', Menlo, monospace" font-size="34" font-weight="600" fill="#858a97">+0.065</text>
+      <text x="0" y="360" font-family="'Space Grotesk', 'Helvetica Neue', Arial, sans-serif" font-size="30" font-weight="600" fill="#12141b">Refusals removed, 2&#215; tasks</text>
+      <text x="0" y="390" font-family="'Space Grotesk', 'Helvetica Neue', Arial, sans-serif" font-size="20" fill="#858a97">21 usable benign tasks; 0.828 on training tasks</text>
+      <rect x="520" y="328" width="35" height="44" fill="{{hazard}}"/>
+      <rect x="520" y="382" width="723" height="44" fill="#a4a9b6"/>
+      <text x="573" y="361" font-family="'JetBrains Mono', Menlo, monospace" font-size="31" font-weight="600" fill="{{hazard}}">0.511</text>
+      <text x="1261" y="415" font-family="'JetBrains Mono', Menlo, monospace" font-size="28" font-weight="400" fill="#6b6f7a">0.730</text>
+      <text x="2128" y="390" text-anchor="end" font-family="'JetBrains Mono', Menlo, monospace" font-size="34" font-weight="600" fill="{{hazard}}">−0.219</text>
+      <text x="0" y="496" font-family="'Space Grotesk', 'Helvetica Neue', Arial, sans-serif" font-size="31" font-weight="700" fill="#12141b">Widened task pool</text>
+      <text x="0" y="526" font-family="'Space Grotesk', 'Helvetica Neue', Arial, sans-serif" font-size="20" fill="#858a97">159 tasks, 683 safe and 611 unsafe</text>
+      <rect x="520" y="464" width="148" height="44" fill="{{hazard}}"/>
+      <rect x="520" y="518" width="424" height="44" fill="#858a97"/>
+      <text x="686" y="497" font-family="'JetBrains Mono', Menlo, monospace" font-size="33" font-weight="600" fill="{{hazard}}">0.547</text>
+      <text x="962" y="551" font-family="'JetBrains Mono', Menlo, monospace" font-size="30" font-weight="600" fill="#12141b">0.635</text>
+      <text x="2128" y="526" text-anchor="end" font-family="'JetBrains Mono', Menlo, monospace" font-size="38" font-weight="700" fill="{{hazard}}">−0.088</text>
+      <rect x="800" y="590" width="34" height="20" fill="{{accent}}"/>
+      <text x="846" y="607" font-family="'Space Grotesk', 'Helvetica Neue', Arial, sans-serif" font-size="23" fill="#4c515c">learned score (upper bar)</text>
+      <rect x="1220" y="590" width="34" height="20" fill="#a4a9b6"/>
+      <text x="1266" y="607" font-family="'Space Grotesk', 'Helvetica Neue', Arial, sans-serif" font-size="23" fill="#4c515c">best trivial baseline (lower bar)</text>
+    </svg>
+    <p class="cap" style="font-size: 22px;"><strong style="color: #4c515c;">Figure 2.</strong> Each pair compares the learned score with the strongest trivial baseline on the same held-out demonstrations. The number that matters is the baseline, which I fixed before the final run. On the final split the learned score sits 0.088 below a step counter.</p>
+  </section>
+
+  <div style="flex: 1; min-height: 20px;"></div>
+
+  <!-- ═════════ CLOSING ═════════ -->
+  <div style="display: grid; grid-template-columns: 0.72fr 1fr; gap: 40px; align-items: stretch;">
+    <div style="border: 4px solid #12141b; padding: 19px 24px; display: flex; flex-direction: column; justify-content: center; gap: 14px;">
+      <div style="display: flex; gap: 34px;">
+        <div><div class="lbl" style="font-size: 18px;">Separation</div><div class="mono" style="font-size: 42px; font-weight: 600; color: {{hazard}}; line-height: 1.1;">−0.024</div></div>
+        <div><div class="lbl" style="font-size: 18px;">Safe mean</div><div class="mono" style="font-size: 42px; font-weight: 600; line-height: 1.1;">0.902</div></div>
+        <div><div class="lbl" style="font-size: 18px;">Unsafe mean</div><div class="mono" style="font-size: 42px; font-weight: 600; line-height: 1.1;">0.878</div></div>
+      </div>
+      <p class="b" style="font-size: 24px;">An AUROC of 0.547 means the score ranks unsafe above safe only slightly more often than chance. Its average score is actually higher for the safe demonstrations.</p>
+    </div>
+    <div style="background: #12141b; padding: 21px 26px; display: flex; flex-direction: column; justify-content: center; gap: 12px;">
+      <div class="lbl" style="font-size: 20px; color: #a4a9b6;">What this means</div>
+      <p class="b" style="font-size: 28px; color: #eaedf4;">A safety score built on a frozen text encoder and trained by comparing whole demonstrations does not carry over to new tasks here. Three things to try next: train the encoder instead of freezing it, compare safe and unsafe versions of the same task, and label individual steps rather than whole demonstrations.</p>
+    </div>
+  </div>
+
+  <footer style="border-top: 4px solid #12141b; margin-top: 12px; padding-top: 10px; display: flex; justify-content: space-between; align-items: baseline; gap: 40px;">
+    <span class="cap" style="font-size: 20px;">I-CUREUS: Internship-Carleton University Research Experience for Undergraduate Students &nbsp;·&nbsp; Teaching and Learning Services, Carleton University</span>
+    <span class="cap" style="font-size: 20px;">Code: <span class="mono" style="font-size: 19px;">[REPO URL]</span> &nbsp;·&nbsp; Data: <span class="mono" style="font-size: 19px;">huggingface.co/kunwar45</span></span>
+  </footer>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#2b45c4","options":["#2b45c4","#1c6f5e","#5b2bc4","#12141b"]},"hazard":{"editor":"color","default":"#c2432a","options":["#c2432a","#c41e5a","#b4600f","#12141b"]},"$preview":{"width":2304,"height":3456}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      accent: this.props.accent ?? '#2b45c4',
+      hazard: this.props.hazard ?? '#c2432a',
+    };
+  }
+}
+</script>
+</body>
+</html>

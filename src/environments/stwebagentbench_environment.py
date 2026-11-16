@@ -14,7 +14,7 @@ import logging
 import os
 from typing import Dict, List, Optional
 
-from src.trajectory_data.trajectory import Trajectory, Step
+from src.trajectory_data.trajectory import Trajectory
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ _ENV_ID_TEMPLATE = "browsergym/STWebAgentBenchEnv.{task_id}"
 _OBS_KEYS_TO_KEEP = {"goal", "url", "axtree_object", "policies", "chat_messages", "pruned_html"}
 
 
-# ── Observation helpers (copied from src/gridworld/icrl/envs/stwebagent.py) ───────
+# ── Observation helpers ───────
 
 def _strip_screenshot(obs: dict) -> dict:
     return {k: v for k, v in obs.items() if k in _OBS_KEYS_TO_KEEP}

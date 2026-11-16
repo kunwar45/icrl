@@ -7,7 +7,6 @@ setup(
     version="0.1.0",
     packages=find_packages(
         include=["src", "src.*"],
-        exclude=["src.gridworld", "src.gridworld.*"],
     ),
     python_requires=">=3.11",
 )

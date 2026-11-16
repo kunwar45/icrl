@@ -1,5 +1,5 @@
 # ABOUTME: Plays MACHIAVELLI episodes with an LLM policy behind an OpenAI-compatible server, recording each step with every option's ground-truth violation label
-# ABOUTME: Use: collect_episodes(games, seeds, kind, policy=OpenAIChatPolicy(url, model), max_steps=50, workers=48) -> list of episode dicts; save_episodes(path, eps)
+# ABOUTME: Use: collect_episodes(games, seeds, kind, policy=OpenAIChatPolicy(url, model), max_steps=50, workers=48[, oracle_expert={...}]) -> list of episode dicts; save_episodes(path, eps)
 """
 One thread per episode: the game engine is pure Python and fast (about a
 thousand engine steps a second on a laptop), so the bottleneck is the model
@@ -55,6 +55,10 @@ class OpenAIChatPolicy:
         )
 
     def __call__(self, system: str, user: str, n_choices: int) -> str:
+        return self.sample(system, user, n_choices, 1)[0]
+
+    def sample(self, system: str, user: str, n_choices: int, k: int) -> list[str]:
+        """k independent completions of one prompt in a single request (shared prefix)."""
         body = json.dumps(
             {
                 "model": self.model,
@@ -64,6 +68,7 @@ class OpenAIChatPolicy:
                 ],
                 "temperature": self.temperature,
                 "max_tokens": self.max_tokens,
+                "n": int(k),
             }
         ).encode()
         for attempt in range(4):
@@ -73,12 +78,12 @@ class OpenAIChatPolicy:
                 )
                 with urllib.request.urlopen(req, timeout=self.timeout_s) as r:
                     out = json.loads(r.read())
-                return out["choices"][0]["message"].get("content") or ""
+                return [c["message"].get("content") or "" for c in out["choices"]]
             except Exception:
                 if attempt == 3:
                     raise
                 time.sleep(2 * (attempt + 1))
-        return ""
+        return [""] * int(k)
 
 
 class ShardedPolicy:
@@ -91,13 +96,17 @@ class ShardedPolicy:
     def __init__(self, policies: list):
         self.policies = policies
 
-    def __call__(self, system: str, user: str, n_choices: int) -> str:
+    def _pick(self, system: str):
         import zlib
 
         key = system.split("\n", 3)[2] if system.count("\n") >= 2 else system[:200]
-        return self.policies[zlib.crc32(key.encode()) % len(self.policies)](
-            system, user, n_choices
-        )
+        return self.policies[zlib.crc32(key.encode()) % len(self.policies)]
+
+    def __call__(self, system: str, user: str, n_choices: int) -> str:
+        return self._pick(system)(system, user, n_choices)
+
+    def sample(self, system: str, user: str, n_choices: int, k: int) -> list[str]:
+        return sample_policy(self._pick(system), system, user, n_choices, k)
 
 
 class RandomPolicy:
@@ -110,6 +119,113 @@ class RandomPolicy:
     def __call__(self, system: str, user: str, n_choices: int) -> str:
         with self.lock:
             return str(self.rng.randrange(n_choices))
+
+
+def sample_policy(
+    policy: Policy, system: str, user: str, n_choices: int, k: int
+) -> list[str]:
+    """k answers to one prompt: one batched request when the policy supports it."""
+    if hasattr(policy, "sample"):
+        return policy.sample(system, user, n_choices, k)
+    return [policy(system, user, n_choices) for _ in range(k)]
+
+
+def play_oracle_expert_episode(
+    game_name: str,
+    seed: int,
+    policy: Policy,
+    *,
+    max_steps: int,
+    policy_kind: str = "nominal",
+    policy_samples: int = 4,
+    option_returns: dict,
+) -> dict:
+    """An expert episode for ICRL: an oracle that knows the true constraint at
+    decision scenes, the policy everywhere else.
+
+    A decision scene has at least one harmful and one harmless option. There the
+    expert takes the harmless option with the highest estimated return
+    (immediate points + mean of random continuations), ties broken towards the
+    policy's own first sampled pick, and the policy (`policy_kind` prompt) is
+    sampled `policy_samples` times on the identical prompt without stepping the
+    game: those samples are the ICRL negatives. At every other scene the
+    expert's move is the policy's on-policy pick.
+    """
+    game = MachiavelliGame(game_name)
+    state = game.reset(seed=seed)
+    rng = random.Random(seed * 7919 + 23)
+    steps = []
+    invalid = 0
+    horizon, n_ret = int(option_returns["horizon"]), int(option_returns["samples"])
+    for t in range(max_steps):
+        if state.done or not state.choices:
+            break
+        labels = game.label_options()
+        n = len(state.choices)
+        sys_p = system_prompt(
+            policy_kind, game.title, state.info, state.remaining_achievements
+        )
+        usr_p = user_prompt(state)
+        harmful = [lab.violates for lab in labels]
+        decision = any(harmful) and not all(harmful)
+        returns, texts, picks = None, [], []
+        if decision:
+            returns = [
+                lab.reward + game.random_return(lab.index, horizon, n_ret, rng)
+                for lab in labels
+            ]
+            texts = sample_policy(policy, sys_p, usr_p, n, int(policy_samples))
+            picks = [parse_action(x, n) for x in texts]
+            clean = [i for i in range(n) if not harmful[i]]
+            best = max(returns[i] for i in clean)
+            tied = [i for i in clean if returns[i] == best]
+            first = next((p for p in picks if p is not None), None)
+            action = first if first in tied else rng.choice(tied)
+            text, valid = f"<oracle {action}>", True
+        else:
+            text = policy(sys_p, usr_p, n)
+            action = parse_action(text, n)
+            valid = action is not None
+            if not valid:
+                invalid += 1
+                action = rng.randrange(n)
+        points_before, scene_before = state.points, state.scene
+        state, reward, harms = game.step(action)
+        violated = bool(harms)
+        steps.append(
+            {
+                "t": t,
+                "system": sys_p,
+                "user": usr_p,
+                "scene": scene_before,
+                "choices": [lab.text for lab in labels],
+                "response": text,
+                "valid_response": valid,
+                "action": action,
+                "oracle": decision,
+                "policy_responses": texts,
+                "policy_actions": picks,
+                "harms": harms,
+                "violated": violated,
+                "avoidable": violated and not all(harmful),
+                "forced": all(harmful),
+                "option_harms": [lab.harms for lab in labels],
+                "option_rewards": [lab.reward for lab in labels],
+                "option_returns": returns,
+                "reward": reward,
+                "points_before": points_before,
+            }
+        )
+    return {
+        "game": game_name,
+        "seed": seed,
+        "kind": "oracle_expert",
+        "policy_kind": policy_kind,
+        "steps": steps,
+        "points": state.points,
+        "max_points": game.max_points,
+        "invalid_responses": invalid,
+    }
 
 
 def play_episode(
@@ -226,25 +342,41 @@ def collect_episodes(
     workers: int = 32,
     option_returns: dict | None = None,
     expert_kind: str | None = None,
+    oracle_expert: dict | None = None,
     log: Callable[[str], None] = print,
 ) -> list[dict]:
+    """Episodes for every (game, seed). With `oracle_expert` = {policy_samples,
+    option_returns} each episode is an oracle-expert episode with `kind` as the
+    policy prompt (play_oracle_expert_episode); otherwise play_episode."""
     jobs = [(g, s) for g in games for s in seeds]
     out: list[dict] = []
     t0 = time.time()
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futs = {
-            pool.submit(
-                play_episode,
+
+    def submit(pool, g, s):
+        if oracle_expert:
+            return pool.submit(
+                play_oracle_expert_episode,
                 g,
                 s,
-                kind,
                 policy,
                 max_steps=max_steps,
-                option_returns=option_returns,
-                expert_kind=expert_kind,
-            ): (g, s)
-            for g, s in jobs
-        }
+                policy_kind=kind,
+                policy_samples=int(oracle_expert["policy_samples"]),
+                option_returns=dict(oracle_expert["option_returns"]),
+            )
+        return pool.submit(
+            play_episode,
+            g,
+            s,
+            kind,
+            policy,
+            max_steps=max_steps,
+            option_returns=option_returns,
+            expert_kind=expert_kind,
+        )
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {submit(pool, g, s): (g, s) for g, s in jobs}
         for i, f in enumerate(as_completed(futs), 1):
             g, s = futs[f]
             try:
@@ -326,6 +458,21 @@ def episode_metrics(episodes: list[dict]) -> dict:
             )
             / max(1, len(ok)),
             "same_pick_as_actor": sum(s["expert_action"] == s["action"] for s in ok)
+            / max(1, len(ok)),
+        }
+    oracle = [s for e in episodes for s in e["steps"] if s.get("oracle")]
+    if oracle:
+        # Ground-truth diagnostics of the policy samples at the decision scenes.
+        picks = [(s, a) for s in oracle for a in s["policy_actions"]]
+        ok = [(s, a) for s, a in picks if a is not None]
+        out["oracle_decision_scenes"] = {
+            "scenes": len(oracle),
+            "share_of_steps": len(oracle) / max(1, out["steps"]),
+            "policy_samples": len(picks),
+            "policy_invalid_rate": 1 - len(ok) / max(1, len(picks)),
+            "policy_harmful_rate": sum(bool(s["option_harms"][a]) for s, a in ok)
+            / max(1, len(ok)),
+            "policy_same_pick_as_oracle": sum(a == s["action"] for s, a in ok)
             / max(1, len(ok)),
         }
     return out

@@ -120,8 +120,8 @@ class Design:
     def __post_init__(self):
         assert self.item_sampling in ("sampled", "fixed"), \
             f"item_sampling must be sampled|fixed, got {self.item_sampling!r}"
-        assert self.item_weights in ("equal", "count"), f"item_weights must be equal|count"
-        assert self.incomplete in ("drop", "error"), f"incomplete must be drop|error"
+        assert self.item_weights in ("equal", "count"), "item_weights must be equal|count"
+        assert self.incomplete in ("drop", "error"), "incomplete must be drop|error"
         assert not (self.item_weights == "count" and self.item_sampling == "sampled"), (
             "item_weights='count' with item_sampling='sampled' is incoherent, so it is refused rather "
             "than silently ignored: weighting a SAMPLED item by however many observations it "

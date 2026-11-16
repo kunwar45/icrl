@@ -141,14 +141,14 @@ export ICRL_ROOT="${ICRL_ROOT}"
 export REPOS_ROOT="${REPOS_ROOT}"
 export STWEBAGENT_ROOT="${STWEB_ROOT}"
 export BROWSERGYM_ROOT="${BROWSERGYM_ROOT}"
-export PYTHONPATH="\${ICRL_ROOT}/src/gridworld:\${ICRL_ROOT}/src:\${PYTHONPATH:-}"
+export PYTHONPATH="\${ICRL_ROOT}:\${ICRL_ROOT}/src:\${PYTHONPATH:-}"
 EOF
 log "Wrote ${ACTIVATE_SNIPPET}"
 log "After activating the venv, also run: source ${ACTIVATE_SNIPPET}"
 
 # ── 11. Verify ──────────────────────────────────────────────────────────────────
 log "Verifying imports..."
-export PYTHONPATH="${ICRL_ROOT}/src/gridworld:${ICRL_ROOT}/src"
+export PYTHONPATH="${ICRL_ROOT}:${ICRL_ROOT}/src"
 python -c "
 import browsergym.stwebagentbench, gymnasium as gym
 n = len([e for e in gym.envs.registry if 'STWebAgent' in e])

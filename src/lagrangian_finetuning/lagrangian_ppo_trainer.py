@@ -41,7 +41,7 @@ import copy
 import json
 import os
 import random
-from typing import List, Optional
+from typing import List
 
 import torch
 import torch.nn.functional as F

@@ -26,7 +26,6 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
 import os
 import sys
 
-import torch
 import hydra
 from omegaconf import DictConfig, OmegaConf
 

@@ -5,12 +5,15 @@ if it stays curated.**
 
 ## What this project is
 
-Constrained fine-tuning of LLM web agents via **Inverse Constraint RL**: infer a
-constraint function C_θ by contrasting expert (safe) and unsafe trajectories, then
-fine-tune a policy with Lagrangian PPO to maximize task reward subject to C_θ.
-Initial benchmark: ST-WebAgentBench (others later — nothing benchmark-specific may
-live outside an adapter or a config). See `docs/overview.md` and
-`docs/trajectory-collection.md`.
+Constrained fine-tuning of LLM agents via **Inverse Constrained RL (ICRL)** as
+defined by Malik et al., ICML 2021: alternate (1) a max-entropy constraint update —
+feasibility φ up on expert actions, down on the CURRENT policy's actions, sparsity
+regulariser — and (2) a Lagrangian policy update (GRPO, reward − λ·cost, dual ascent
+on λ), until the policy reproduces the expert. That loop is the method; a constraint
+trained once on fixed data is a supervised classifier baseline, never call it ICRL.
+Current benchmark: secret-keeping (`docs/secret-keeping.md`); earlier: ST-WebAgentBench,
+ODCV, MACHIAVELLI. Nothing benchmark-specific may live outside an adapter or a config.
+See `docs/overview.md`.
 
 ## Naming conventions (STRICT)
 
@@ -89,12 +92,11 @@ src/                        reusable code, imported as src.*, one package per pi
   trajectory_collection/      roll out agents in a real env, keep evaluator-labelled episodes
   trajectory_generation/      synthesize plans, execute with the policy, keep verified episodes
   trajectory_embedding/       frozen-backbone trajectory encoder C_θ = encoder + MLP head
-  icrl_dual_training/         ICRL alternating constraint/policy training of C_θ + evaluation
-  lagrangian_finetuning/      Lagrangian PPO fine-tuning of the LLM policy (dual λ, reward, rollout)
-  environments/               ST-WebAgentBench interface + deterministic mock env
-  trajectory_data/            trajectory/action schema, trace loaders, safety verifier
+  icrl_dual_training/         ICRL constraint models: max-entropy feasibility (maxent_constraint.py), baseline classifiers, evaluation
+  lagrangian_finetuning/      policy updates: Lagrangian GRPO (the ICRL forward step), baselines (SFT, DPO, PPO), dual λ, reward
+  environments/               benchmark adapters (secret-keeping, ODCV, MACHIAVELLI, ST-WebAgentBench) + deterministic mock env
+  trajectory_data/            trajectory/action schema, trace loaders
   models/, utils/             shared model loading, config/logging/compute helpers
-  gridworld/                  gridworld ICRL reference implementation (own configs/scripts/tests)
 scripts/                    one thin CLI per pipeline stage
 scripts/slurm/              SLURM wrappers, one per script, plus shared job_environment.sh
 configs/                    YAML per variant, one directory per stage; the config fully defines the run

@@ -1,0 +1,11 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 2304, "h": 3456, "title": "I-CUREUS capstone poster", "print": "fixed" }
+  ],
+  "annotations": [
+    { "id": "format-note", "x": 0, "y": -210, "w": 700, "text": "24 x 36 in portrait (2304 x 3456 px at 96 px/inch).\nCarleton does not publish a size for the Showcase; that lives in the\nI-CUREUS Brightspace course, or ask icureus@carleton.ca.\nBody type is 26px = ~19.5pt." },
+    { "id": "placeholders", "x": 760, "y": -210, "w": 700, "text": "Three placeholders left to fill:\n[SUPERVISOR] in the byline, [QR CODE] top right, [REPO URL] in the footer.\nEverything else is a measured number from the run." },
+    { "id": "voice-note", "x": 1520, "y": -210, "w": 700, "text": "Written for a general Showcase audience: first person, plain language,\nno em dashes, no conference framing. Syne 800 for the title,\nSpace Grotesk for body, JetBrains Mono for every number." }
+  ],
+  "launch": { "view": "focused", "file": "Main.dc.html" }
+}

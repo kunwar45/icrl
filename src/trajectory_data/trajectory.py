@@ -1,6 +1,6 @@
 # ABOUTME: Core Trajectory and Step dataclasses with dict (de)serialization and to_text() for the encoder.
 # ABOUTME: The common data currency of the pipeline — every stage from collection to evaluation imports these.
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import List, Optional
 import json
 

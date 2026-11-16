@@ -55,7 +55,6 @@ from dataclasses import dataclass, field
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class StepFeasibilityHead(nn.Module):

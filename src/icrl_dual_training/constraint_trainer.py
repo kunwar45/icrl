@@ -22,7 +22,6 @@ Three numbers to watch every iteration:
 
 from __future__ import annotations
 
-import random
 from typing import Callable, Optional
 
 import torch

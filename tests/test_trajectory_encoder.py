@@ -1,10 +1,6 @@
 # ABOUTME: Tests for trajectory text formatting consumed by TrajectoryEncoder — mock backbone, no real LLM loaded.
 # ABOUTME: Run: pytest tests/test_trajectory_encoder.py
 """Encoder tests that run without loading a real LLM (uses mock backbone)."""
-import torch
-import torch.nn as nn
-from unittest.mock import MagicMock, patch
-from omegaconf import OmegaConf
 from src.trajectory_data.trajectory import Trajectory, Step
 
 

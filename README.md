@@ -298,7 +298,7 @@ venv activate, `PYTHONPATH` export, and a SuiteCRM reachability check in one ste
 | `ICRL_ROOT` | `~/icrl` |
 | `STWEBAGENT_ROOT` | `$REPOS_ROOT/ST-WebAgentBench` |
 | `BROWSERGYM_ROOT` | `$REPOS_ROOT/BrowserGym` |
-| `PYTHONPATH` | `icrl` + `icrl/src/gridworld` |
+| `PYTHONPATH` | `icrl` + `icrl/src` |
 
 ---
 
@@ -687,7 +687,6 @@ git fetch upstream && git merge upstream/main && git push fork main
 
 icrl/
   src/                          pipeline-stage packages (see CLAUDE.md)
-  src/gridworld/                gridworld ICRL reference implementation
   configs/                      Hydra configs, one directory per pipeline stage
   scripts/                      entry points, setup_cluster.sh, start_suitecrm_apptainer.sh
   scripts/slurm/                SLURM job templates + job_environment.sh
@@ -707,8 +706,7 @@ icrl/
 ## Tests
 
 ```bash
-export PYTHONPATH=.:src/gridworld
-pytest src/gridworld/tests/unit/ -q
+export PYTHONPATH=.
 pytest tests/ --ignore=tests/test_reasoning_trace.py -q
 ```
 

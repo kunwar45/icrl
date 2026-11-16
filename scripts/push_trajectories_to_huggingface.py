@@ -386,7 +386,7 @@ the database check enforces the same requirement more strictly.
             f"| {t} | {per_task[t]} | {'compliant deletion with consent requested first' if t == 236 else 'policy override — refuses the requested deletion and performs the mandated substitute instead' if t == 237 else 'see state_detail'} |"
             for t in tasks
         )
-        + f"""
+        + """
 
 Ground truth actually checked, per task:
 

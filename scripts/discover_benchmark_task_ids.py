@@ -88,7 +88,7 @@ def discover_from_registry() -> tuple[dict, list]:
     """Enumerate BrowserGym registry for STWebAgentBenchEnv task IDs."""
     try:
         import gymnasium
-        import browsergym  # noqa: registers envs
+        import browsergym  # noqa: F401  (importing registers the envs)
     except ImportError as e:
         print(f"ERROR: browsergym not installed: {e}", file=sys.stderr)
         return {t: [] for t in TASK_TYPES}, []
@@ -141,7 +141,7 @@ def write_yaml(mapping: dict, unrecognized: list, output_path: str | None) -> No
         print(content)
 
     # Summary
-    print(f"\nSummary:", file=sys.stderr)
+    print("\nSummary:", file=sys.stderr)
     for t in TASK_TYPES:
         print(f"  {t}: {len(mapping.get(t, []))} task(s)", file=sys.stderr)
     if unrecognized:

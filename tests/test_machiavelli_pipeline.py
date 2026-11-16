@@ -310,6 +310,88 @@ def test_paired_episode_records_expert_pick_at_same_state():
     assert m["expert_at_actor_states"]["steps"] == len(e["steps"])
 
 
+def _oracle_step(action, policy_actions, returns, oracle=True):
+    # Deliberately no harm labels: the pair filters must not need them.
+    return {
+        "t": 0,
+        "scene": "scene",
+        "choices": ["a", "b", "c"],
+        "action": action,
+        "oracle": oracle,
+        "policy_actions": policy_actions,
+        "option_returns": returns,
+    }
+
+
+def test_oracle_pair_actions_truth_table_without_harm_labels():
+    from src.icrl_dual_training.machiavelli_step_constraint import (
+        oracle_pair_actions,
+    )
+
+    s = _oracle_step(0, [1, 1, 2, None, 0], [1.0, 3.0, 0.5])
+    assert oracle_pair_actions(s, "any_different") == [1, 2]  # distinct, != oracle
+    assert oracle_pair_actions(s, "higher_return") == [1]  # 3.0 > 1.0; 0.5 is not
+    tie = _oracle_step(0, [1], [2.0, 2.0, 0.0])
+    assert oracle_pair_actions(tie, "higher_return") == []  # strictly higher only
+    assert (
+        oracle_pair_actions(_oracle_step(0, [1], [0, 9, 0], False), "any_different")
+        == []
+    )
+    with pytest.raises(ValueError):
+        oracle_pair_actions(s, "harm_label")
+
+
+def test_oracle_demo_steps_are_row_aligned():
+    from src.icrl_dual_training.machiavelli_step_constraint import oracle_demo_steps
+
+    eps = [
+        {"game": "g", "seed": 0, "steps": [_oracle_step(0, [1, 2], [1.0, 3.0, 4.0])]}
+    ]
+    expert, unsafe = oracle_demo_steps(eps, pair_filter="higher_return")
+    assert len(expert) == len(unsafe) == 2
+    assert [e["state"] for e in expert] == [u["state"] for u in unsafe]
+    assert (
+        expert[0]["text"] == expert[1]["text"]
+    )  # the oracle pick, repeated per negative
+    assert unsafe[0]["text"] != unsafe[1]["text"]
+
+
+@pytest.mark.skipif(
+    not os.environ.get("MACHIAVELLI_ROOT"),
+    reason="needs the benchmark clone with game_data",
+)
+def test_oracle_expert_episode_takes_best_harmless_option_at_decisions():
+    from src.environments.machiavelli.rollout_collector import (
+        RandomPolicy,
+        episode_metrics,
+        play_oracle_expert_episode,
+    )
+
+    e = play_oracle_expert_episode(
+        "kidnapped",
+        0,
+        RandomPolicy(0),
+        max_steps=30,
+        policy_samples=3,
+        option_returns={"horizon": 2, "samples": 1},
+    )
+    decisions = [s for s in e["steps"] if s["oracle"]]
+    assert decisions, "kidnapped should have a decision scene in 30 steps"
+    for s in e["steps"]:
+        harms = s["option_harms"]
+        is_decision = any(harms) and not all(harms)
+        assert s["oracle"] == is_decision
+        if is_decision:
+            assert not harms[s["action"]] and not s["violated"]
+            clean = [r for r, h in zip(s["option_returns"], harms) if not h]
+            assert s["option_returns"][s["action"]] == max(clean)
+            assert len(s["policy_actions"]) == 3
+        else:
+            assert s["policy_actions"] == [] and s["option_returns"] is None
+    m = episode_metrics([e])
+    assert m["oracle_decision_scenes"]["scenes"] == len(decisions)
+
+
 def test_step_constraint_load_passes_device(tmp_path, monkeypatch):
     import json as _json
 

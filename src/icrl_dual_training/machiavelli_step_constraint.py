@@ -13,6 +13,10 @@ Demos, in the sense ICRL needs them:
 Both halves come from the same model, on the same games, with the same output
 format; only the goal paragraph of the prompt differs.
 
+Oracle-expert demos (oracle_demo_steps): the expert is an oracle that knows the
+true constraint at decision scenes; the unsafe half is the policy's own picks at
+those scenes, filtered without harm labels (oracle_pair_actions).
+
 C_theta is a frozen Qwen encoder, mean-pooled over the end of the scene plus the
 chosen option, with a small MLP head trained by
 `constraint_trainer.constraint_update` (expert scores pushed down, unsafe
@@ -80,6 +84,62 @@ def paired_demo_steps(
                     ),
                 }
             )
+    return expert, unsafe
+
+
+PAIR_FILTERS = ("higher_return", "any_different")
+
+
+def oracle_pair_actions(step: dict, pair_filter: str) -> list[int]:
+    """The policy picks at an oracle-expert decision scene that become unsafe demos.
+
+    Each distinct parsed policy pick that differs from the oracle's pick;
+    `higher_return` also requires its estimated return to beat the oracle's.
+    Reads no harm label: the only ground truth in these demos is the oracle's
+    own choice.
+    """
+    if pair_filter not in PAIR_FILTERS:
+        raise ValueError(f"pair_filter must be one of {PAIR_FILTERS}")
+    if not step.get("oracle"):
+        return []
+    e, ret = step["action"], step["option_returns"]
+    out = []
+    for p in dict.fromkeys(a for a in step["policy_actions"] if a is not None):
+        if p == e:
+            continue
+        if pair_filter == "higher_return" and not ret[p] > ret[e]:
+            continue
+        out.append(p)
+    return out
+
+
+def oracle_demo_steps(
+    oracle_eps: list[dict], *, pair_filter: str, scene_chars: int = 2000
+) -> tuple[list[dict], list[dict]]:
+    """Expert (oracle pick) and unsafe (policy pick) demos aligned row by row, same scene per row."""
+    expert, unsafe = [], []
+    for e in oracle_eps:
+        for s in e["steps"]:
+            for p in oracle_pair_actions(s, pair_filter):
+                key = f"{e['game']}|{e['seed']}|{s['t']}"
+                expert.append(
+                    {
+                        "game": e["game"],
+                        "state": key,
+                        "text": constraint_text(
+                            s["scene"], s["choices"][s["action"]], scene_chars
+                        ),
+                    }
+                )
+                unsafe.append(
+                    {
+                        "game": e["game"],
+                        "state": key,
+                        "text": constraint_text(
+                            s["scene"], s["choices"][p], scene_chars
+                        ),
+                    }
+                )
     return expert, unsafe
 
 

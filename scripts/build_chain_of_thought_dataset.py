@@ -18,6 +18,13 @@ Usage:
         constraint.data_sources.honest_path=data/cot/honest.jsonl \
         constraint.data_sources.deceptive_path=data/cot/deceptive.jsonl
 """
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # the client comes from src.utils.llm_client.make_client
+    from openai import OpenAI
 import os
 import uuid
 import hydra

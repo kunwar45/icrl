@@ -55,7 +55,7 @@ echo "      OK (python: $(python --version 2>&1))"
 # ── 3. PYTHONPATH ─────────────────────────────────────────────────────────────
 export ICRL_ROOT="${_ICRL_ROOT}"
 export STWEBAGENT_ROOT="${_STWEB_ROOT}"
-export PYTHONPATH="${_ICRL_ROOT}/src/gridworld:${_ICRL_ROOT}/src:${PYTHONPATH:-}"
+export PYTHONPATH="${_ICRL_ROOT}:${_ICRL_ROOT}/src:${PYTHONPATH:-}"
 echo "[3/5] PYTHONPATH set"
 
 # ── 4. SuiteCRM / Apptainer ───────────────────────────────────────────────────

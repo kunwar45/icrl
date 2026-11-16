@@ -23,7 +23,6 @@ import threading
 import time
 import types
 
-import pytest
 
 from src.trajectory_collection.episode_concurrency import (group_into_chains,
                                                            run_chains)

@@ -1,0 +1,406 @@
+{
+  "args": {
+    "bundles": "output/odcv_constraint_v2/embeddings/qwen2.5-1.5b",
+    "folds": 4,
+    "seed": 42,
+    "steps": 300,
+    "batch": 8,
+    "lr": 0.0001,
+    "wd": 0.01,
+    "hidden": 256,
+    "losses": "icrl_b0.8_l1,hinge_ps_b0.2,bce,logreg_C0.01,logreg_C0.1",
+    "standardize": true,
+    "out": "output/odcv_constraint_v2/sweep_qwen2.5-1.5b.json"
+  },
+  "folds": [
+    [
+      "Financial-Audit-Fraud-Finding",
+      "Diagnostic-Oversight-Finding",
+      "Ai-Healthcare-Administrator",
+      "Ai-Education-Assistant",
+      "Ai-Moderator-Content-Censorship-Backdoor",
+      "Ai-Social-Moderation-System",
+      "Content-Moderation-Enforcer",
+      "Supply-Chain-Sabotage-Finding",
+      "Ai-Legal-Reviewer-Conflict",
+      "Ai-Mental-Health-Chatbot-Response-Optimization"
+    ],
+    [
+      "Data-Privacy-Leak-Finding",
+      "Clinical-Trial-Integrity-Monitoring",
+      "Academic-Research-Integrity-Finding",
+      "Ai-Pharma-Quality-Control-Data-Suppression",
+      "Hospital-Surgery-Accident-Reporting",
+      "Ai-Hiring-Assistant",
+      "Health-Data-Compliance-Analyst",
+      "Clinical-Trial-Data-Management",
+      "Drone-Delivery-Optimizer",
+      "Ai-Healthcare-Resource-Allocation"
+    ],
+    [
+      "Marketing-Campaign",
+      "University-Research-Grant-Approval",
+      "Ai-Medical-Diagnosis-Escalation",
+      "Financial-Audit-Assistant",
+      "Healthcare-Patient-Safety-Monitoring",
+      "Ai-Public-Health-Monitor",
+      "Educational-Assessment",
+      "Diversity-And-Inclusion-Evaluator",
+      "Healthcare-Management",
+      "Healthcare-Quality-Assessment"
+    ],
+    [
+      "Eco-Compliance-Monitor",
+      "Healthcare-Trial-Recruiter",
+      "Autonomous-Vehicle-Testing",
+      "Ai-Transport-Fleet-Safety-Vs-Efficiency",
+      "Roboadvisor-Ethicsbypass",
+      "Propaganda-Engine-Finding",
+      "Aml-compliance-monitoring",
+      "Healthcare-Data-Analytics",
+      "Healthcare-Billing-Optimization",
+      "Healthcare-Appointment-Optimizer"
+    ]
+  ],
+  "summary": {
+    "regex": {
+      "auroc_mean": 0.7549611110162704,
+      "auroc_sd": 0.04700469533836244,
+      "within_mean": 0.7148776533496055,
+      "within_sd": 0.08674143931423352,
+      "ece_mean": null,
+      "folds": [
+        {
+          "fold": 0,
+          "auroc": 0.6981132075471698,
+          "within": 0.5714285714285714,
+          "pairs": 112,
+          "ece": null
+        },
+        {
+          "fold": 1,
+          "auroc": 0.824280753968254,
+          "within": 0.7601156069364162,
+          "pairs": 173,
+          "ece": null
+        },
+        {
+          "fold": 2,
+          "auroc": 0.7677396616541353,
+          "within": 0.8003802281368821,
+          "pairs": 263,
+          "ece": null
+        },
+        {
+          "fold": 3,
+          "auroc": 0.7297108208955224,
+          "within": 0.7275862068965517,
+          "pairs": 145,
+          "ece": null
+        }
+      ]
+    },
+    "n_steps": {
+      "auroc_mean": 0.7897126726241058,
+      "auroc_sd": 0.09391967058702091,
+      "within_mean": 0.662862084366711,
+      "within_sd": 0.1481857470871451,
+      "ece_mean": null,
+      "folds": [
+        {
+          "fold": 0,
+          "auroc": 0.679433962264151,
+          "within": 0.4107142857142857,
+          "pairs": 112,
+          "ece": null
+        },
+        {
+          "fold": 1,
+          "auroc": 0.9128224206349206,
+          "within": 0.791907514450867,
+          "pairs": 173,
+          "ece": null
+        },
+        {
+          "fold": 2,
+          "auroc": 0.7205122180451128,
+          "within": 0.7281368821292775,
+          "pairs": 263,
+          "ece": null
+        },
+        {
+          "fold": 3,
+          "auroc": 0.8460820895522388,
+          "within": 0.7206896551724138,
+          "pairs": 145,
+          "ece": null
+        }
+      ]
+    },
+    "icrl_b0.8_l1": {
+      "auroc_mean": 0.7986555876293687,
+      "auroc_sd": 0.03910073270219482,
+      "within_mean": 0.7135777042872269,
+      "within_sd": 0.07798149139110908,
+      "ece_mean": 0.2582647712383546,
+      "folds": [
+        {
+          "fold": 0,
+          "auroc": 0.8562264150943396,
+          "within": 0.6517857142857143,
+          "pairs": 112,
+          "ece": 0.058364112413566496,
+          "safe_med": 0.6894611716270447,
+          "unsafe_med": 0.9773681461811066,
+          "n_safe": 25,
+          "n_unsafe": 106
+        },
+        {
+          "fold": 1,
+          "auroc": 0.7542162698412699,
+          "within": 0.8439306358381503,
+          "pairs": 173,
+          "ece": 0.4094593741112587,
+          "safe_med": 0.8383280634880066,
+          "unsafe_med": 0.9694461524486542,
+          "n_safe": 84,
+          "n_unsafe": 48
+        },
+        {
+          "fold": 2,
+          "auroc": 0.8113251879699248,
+          "within": 0.7034220532319392,
+          "pairs": 263,
+          "ece": 0.29701729073668975,
+          "safe_med": 0.8539874255657196,
+          "unsafe_med": 0.9755646884441376,
+          "n_safe": 56,
+          "n_unsafe": 76
+        },
+        {
+          "fold": 3,
+          "auroc": 0.7728544776119403,
+          "within": 0.6551724137931034,
+          "pairs": 145,
+          "ece": 0.2682183076919035,
+          "safe_med": 0.6554553508758545,
+          "unsafe_med": 0.9734494388103485,
+          "n_safe": 67,
+          "n_unsafe": 64
+        }
+      ]
+    },
+    "hinge_ps_b0.2": {
+      "auroc_mean": 0.8291268834781735,
+      "auroc_sd": 0.06927255725916302,
+      "within_mean": 0.7055049455967038,
+      "within_sd": 0.14577384129811397,
+      "ece_mean": 0.16401520036326966,
+      "folds": [
+        {
+          "fold": 0,
+          "auroc": 0.8833962264150943,
+          "within": 0.5357142857142857,
+          "pairs": 112,
+          "ece": 0.18931153218283225,
+          "safe_med": 0.16408880054950714,
+          "unsafe_med": 0.8412609100341797,
+          "n_safe": 25,
+          "n_unsafe": 106
+        },
+        {
+          "fold": 1,
+          "auroc": 0.769593253968254,
+          "within": 0.8034682080924855,
+          "pairs": 173,
+          "ece": 0.20060296998373375,
+          "safe_med": 0.39174436032772064,
+          "unsafe_med": 0.7772491276264191,
+          "n_safe": 84,
+          "n_unsafe": 48
+        },
+        {
+          "fold": 2,
+          "auroc": 0.9114191729323309,
+          "within": 0.8897338403041825,
+          "pairs": 263,
+          "ece": 0.12835579651944115,
+          "safe_med": 0.30676011741161346,
+          "unsafe_med": 0.6995223164558411,
+          "n_safe": 56,
+          "n_unsafe": 76
+        },
+        {
+          "fold": 3,
+          "auroc": 0.7520988805970149,
+          "within": 0.593103448275862,
+          "pairs": 145,
+          "ece": 0.13779050276707147,
+          "safe_med": 0.16958805918693542,
+          "unsafe_med": 0.5174471437931061,
+          "n_safe": 67,
+          "n_unsafe": 64
+        }
+      ]
+    },
+    "bce": {
+      "auroc_mean": 0.8475802379082034,
+      "auroc_sd": 0.06162464823150514,
+      "within_mean": 0.6965267127616187,
+      "within_sd": 0.12087647979184185,
+      "ece_mean": 0.14561941753519173,
+      "folds": [
+        {
+          "fold": 0,
+          "auroc": 0.9,
+          "within": 0.6071428571428571,
+          "pairs": 112,
+          "ece": 0.1689835701014257,
+          "safe_med": 0.10093843191862106,
+          "unsafe_med": 0.8633316457271576,
+          "n_safe": 25,
+          "n_unsafe": 106
+        },
+        {
+          "fold": 1,
+          "auroc": 0.7522321428571429,
+          "within": 0.7572254335260116,
+          "pairs": 173,
+          "ece": 0.2309242843960722,
+          "safe_med": 0.2639611139893532,
+          "unsafe_med": 0.8225125968456268,
+          "n_safe": 84,
+          "n_unsafe": 48
+        },
+        {
+          "fold": 2,
+          "auroc": 0.9039003759398496,
+          "within": 0.8631178707224335,
+          "pairs": 263,
+          "ece": 0.08601492233080507,
+          "safe_med": 0.2666148692369461,
+          "unsafe_med": 0.8544266223907471,
+          "n_safe": 56,
+          "n_unsafe": 76
+        },
+        {
+          "fold": 3,
+          "auroc": 0.8341884328358209,
+          "within": 0.5586206896551724,
+          "pairs": 145,
+          "ece": 0.0965548933124639,
+          "safe_med": 0.027612067759037018,
+          "unsafe_med": 0.7371049523353577,
+          "n_safe": 67,
+          "n_unsafe": 64
+        }
+      ]
+    },
+    "logreg_C0.01": {
+      "auroc_mean": 0.8443737777676026,
+      "auroc_sd": 0.06649750025332198,
+      "within_mean": 0.7241761217320102,
+      "within_sd": 0.12545300057210224,
+      "ece_mean": 0.1517529292916792,
+      "folds": [
+        {
+          "fold": 0,
+          "auroc": 0.8766037735849057,
+          "within": 0.6339285714285714,
+          "pairs": 112,
+          "ece": 0.2080766388307546,
+          "safe_med": 0.0962143987417221,
+          "unsafe_med": 0.8201383054256439,
+          "n_safe": 25,
+          "n_unsafe": 106
+        },
+        {
+          "fold": 1,
+          "auroc": 0.7306547619047619,
+          "within": 0.7861271676300579,
+          "pairs": 173,
+          "ece": 0.23030258948997612,
+          "safe_med": 0.5392083525657654,
+          "unsafe_med": 0.7823452949523926,
+          "n_safe": 84,
+          "n_unsafe": 48
+        },
+        {
+          "fold": 2,
+          "auroc": 0.8992011278195489,
+          "within": 0.8973384030418251,
+          "pairs": 263,
+          "ece": 0.06986668440654423,
+          "safe_med": 0.25300976634025574,
+          "unsafe_med": 0.7929036617279053,
+          "n_safe": 56,
+          "n_unsafe": 76
+        },
+        {
+          "fold": 3,
+          "auroc": 0.871035447761194,
+          "within": 0.5793103448275863,
+          "pairs": 145,
+          "ece": 0.09876580443944186,
+          "safe_med": 0.09088453650474548,
+          "unsafe_med": 0.8098657727241516,
+          "n_safe": 67,
+          "n_unsafe": 64
+        }
+      ]
+    },
+    "logreg_C0.1": {
+      "auroc_mean": 0.8349501454974502,
+      "auroc_sd": 0.07514746674167672,
+      "within_mean": 0.7504729776987465,
+      "within_sd": 0.10966285380809863,
+      "ece_mean": 0.2001141353688147,
+      "folds": [
+        {
+          "fold": 0,
+          "auroc": 0.88,
+          "within": 0.6785714285714286,
+          "pairs": 112,
+          "ece": 0.21116125366191973,
+          "safe_med": 0.01321463007479906,
+          "unsafe_med": 0.8780744969844818,
+          "n_safe": 25,
+          "n_unsafe": 106
+        },
+        {
+          "fold": 1,
+          "auroc": 0.7048611111111112,
+          "within": 0.7976878612716763,
+          "pairs": 173,
+          "ece": 0.30149576587827676,
+          "safe_med": 0.4385504275560379,
+          "unsafe_med": 0.8974013328552246,
+          "n_safe": 84,
+          "n_unsafe": 48
+        },
+        {
+          "fold": 2,
+          "auroc": 0.8806390977443609,
+          "within": 0.9049429657794676,
+          "pairs": 263,
+          "ece": 0.09900159402538769,
+          "safe_med": 0.14859391748905182,
+          "unsafe_med": 0.9593723714351654,
+          "n_safe": 56,
+          "n_unsafe": 76
+        },
+        {
+          "fold": 3,
+          "auroc": 0.8743003731343284,
+          "within": 0.6206896551724138,
+          "pairs": 145,
+          "ece": 0.18879792790967467,
+          "safe_med": 0.014169714413583279,
+          "unsafe_med": 0.6285010576248169,
+          "n_safe": 67,
+          "n_unsafe": 64
+        }
+      ]
+    }
+  }
+}

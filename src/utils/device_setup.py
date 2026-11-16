@@ -1,7 +1,6 @@
 # ABOUTME: Accelerator/device selection and RNG seeding — the single source of truth for compute placement.
 # ABOUTME: setup_accelerator/get_device/seed_everything are called by the training and evaluation scripts.
 """Device/accelerator setup. Single source of truth — no hardcoded devices in other files."""
-import os
 import torch
 from accelerate import Accelerator
 from omegaconf import DictConfig

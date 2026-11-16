@@ -1,0 +1,6 @@
+{
+  "encoder_model": "Qwen/Qwen2.5-1.5B",
+  "hidden_size": 1536,
+  "max_length": 4096,
+  "text_mode": "actions_only"
+}

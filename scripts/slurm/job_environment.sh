@@ -66,7 +66,7 @@ export STWEBAGENT_ROOT
 # the package on the path and every `from src.x import y` fails.
 # STWEBAGENT_ROOT holds the `stwebagentbench` package (task configs + evaluators),
 # which is separate from the pip-installed `browsergym.stwebagentbench` shim.
-export PYTHONPATH="${ICRL_REPO}:${ICRL_REPO}/src/gridworld:${STWEBAGENT_ROOT}:${PYTHONPATH:-}"
+export PYTHONPATH="${ICRL_REPO}:${STWEBAGENT_ROOT}:${PYTHONPATH:-}"
 
 # Export .env so every stage sees WA_SUITECRM / GITLAB / SHOPPING_ADMIN. Only the
 # collection scripts call python-dotenv; fine-tuning and CuP evaluation roll out

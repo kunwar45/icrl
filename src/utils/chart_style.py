@@ -15,14 +15,13 @@ page.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Sequence
 
 import matplotlib
 matplotlib.use("Agg")  # no display on a compute node
 
 import matplotlib.pyplot as plt
-import numpy as np
 from matplotlib.path import Path as MplPath
 from matplotlib.patches import PathPatch
 

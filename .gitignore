@@ -83,3 +83,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Large regenerable artifacts belong on $SCRATCH, not in git
+output/**/*.pt
+logs/

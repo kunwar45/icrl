@@ -1,20 +1,63 @@
 # Project overview — what this codebase does
 
-Constrained fine-tuning of an LLM web agent using **Inverse Constraint
-Reinforcement Learning (ICRL)**. The initial target benchmark is
-[ST-WebAgentBench](https://github.com/segev-shlomov/ST-WebAgentBench), where an
-agent operates a real CRM (SuiteCRM) through a browser under explicit safety
-policies; other environments are planned later. The method itself is
-environment-agnostic — it needs only trajectories plus a ground-truth safety
-verdict per episode (the `safety_report` contract), so the benchmark is a
-pluggable component, not part of the method.
+Constrained fine-tuning of LLM agents with **Inverse Constrained Reinforcement
+Learning (ICRL)**: infer a constraint nobody wrote down from expert
+demonstrations, then fine-tune the policy to maximise task reward subject to
+that learned constraint. Benchmarks are pluggable (adapters + configs); the
+current one is **secret-keeping** (a chatbot holds a secret code in its system
+prompt and must not reveal it, while an LLM judge rewards doing what the user
+asks). Earlier tracks: ST-WebAgentBench (its pipeline is described below), ODCV, MACHIAVELLI.
 
-The core idea: nobody hand-writes a safety reward. Instead, a **constraint
-function C_θ is inferred by contrast** between safe expert demonstrations and
-unsafe rollouts, then a policy is fine-tuned to maximize task reward while
-keeping C_θ below a budget.
+## The method (the standard every new run follows)
 
-## The method in one paragraph
+ICRL as defined by Malik, Anwar, Aghasi & Ahmed, *Inverse Constrained
+Reinforcement Learning*, ICML 2021 (arXiv:2011.09999), and by the survey Liu et
+al. 2024 (arXiv:2409.07569, Sec. 4.3 / 6.2): **alternate a constraint update and
+a constrained policy update until the policy reproduces the expert.** Each round:
+
+1. **Sample the current policy** on the training contexts (no filtering).
+2. **Inverse step.** Update a feasibility function φ_ω(x, y) ∈ (0, 1)
+   (frozen LLM encoder + MLP head; cost c = 1 − φ) by the maximum-entropy
+   likelihood of the expert data: raise φ on expert actions, lower it on the
+   *current policy's* actions, plus Malik's sparsity regulariser toward feasible
+   (`src/icrl_dual_training/maxent_constraint.py::maxent_constraint_update`).
+   Warm-start from the previous round.
+3. **Forward step.** Constrained RL with the Lagrangian
+   `max E[r] − λ (E[c] − ε)`, implemented with **GRPO** (Shao et al. 2024,
+   arXiv:2402.03300) via Hugging Face TRL on a LoRA policy, resumed across rounds
+   (`src/lagrangian_finetuning/secret_keeping_constrained_grpo.py`).
+4. **Dual step.** `λ ← clip(λ + η (mean cost − ε), 0, λ_max)` every GRPO step.
+
+The ground-truth constraint check is used only to grade and to audit
+(AUROC of the learned cost on each round's policy samples); it never enters the
+reward or the constraint objective.
+
+**Implemented for secret-keeping** as the `icrl_loop` stage of
+`scripts/run_secret_keeping_icrl_pipeline.py`, config
+`configs/lagrangian_finetuning/secret_keeping_icrl_loop_qwen7b.yaml`
+(4 rounds × 150 GRPO steps, ε = 0.1).
+
+## Baselines (not ICRL — name them as what they are)
+
+Same pipeline script, same test set, one config each:
+
+| Name | What it is | Config |
+|---|---|---|
+| Learned constraint classifier + RLHF | a supervised binary classifier (expert reply → 0, base-model reply that beats the expert's reward → 1) trained once, then GRPO with a fixed penalty λ = 5 | `secret_keeping_constrained_grpo_qwen7b.yaml` |
+| SFT on expert replies | behaviour cloning on the expert demonstrations | `secret_keeping_expert_sft_qwen7b.yaml` |
+| RL + exact constraint check | GRPO with the ground-truth check as the cost (upper bound for the cost signal) | `secret_keeping_grpo_exact_leak_cost_qwen7b.yaml` |
+| RL + prompted LLM judge | GRPO with a hand-written YES/NO safety prompt as the cost | `secret_keeping_grpo_llm_judge_cost_qwen7b.yaml` |
+| Classifier + DPO | the classifier above with Lagrangian DPO (superseded) | `secret_keeping_constrained_dpo_qwen7b.yaml` |
+
+The one-shot classifier only borrows ICRL's *data* idea (the expert gives up
+reward to avoid the constraint); without the loop against the current policy
+and the max-entropy objective it is not ICRL, and a policy trained long enough
+against it learns to slip past it.
+
+## Earlier ST-WebAgentBench pipeline (one-shot constraint + Lagrangian PPO)
+
+This predates the standard above: C_θ is trained once on a fixed expert/unsafe
+contrast set, then frozen for Lagrangian PPO. Kept for reference.
 
 Collect two sets of trajectories: *expert* demos (a strong model following the
 policies, kept only when it succeeds with zero violations) and *unsafe* demos
@@ -22,8 +65,7 @@ policies, kept only when it succeeds with zero violations) and *unsafe* demos
 Train a constraint head C_θ over trajectory embeddings so expert trajectories
 score below an anchor β and unsafe/policy trajectories score above it
 (`src/icrl_dual_training/constraint_trainer.py`). Verify C_θ generalizes via AUROC on held-out
-tasks. Then fine-tune the policy with **Lagrangian constrained PPO** — this is
-*not* RLHF: there is no preference data and no learned reward model. Task
+tasks. Then fine-tune the policy with **Lagrangian constrained PPO**. Task
 reward R is the benchmark's own success signal (kept deliberately separate so
 safety opinions don't leak into R — see `src/lagrangian_finetuning/reward_model.py`), and the
 objective is
@@ -35,7 +77,7 @@ maximize  R(τ) − λ · C_θ(τ)
 with λ adapted by dual ascent (`src/lagrangian_finetuning/dual_variable.py`) to keep expected
 constraint cost under a budget ε. The policy is trained as a LoRA adapter.
 
-## Pipeline stages
+### Pipeline stages (ST-WebAgentBench driver)
 
 One driver runs everything: `python scripts/run_experiment.py --profile <p>`.
 
@@ -57,7 +99,7 @@ train on. Eval runs *before and after* fine-tuning so the claim is "constraint
 following improved without killing task performance" — a single post-hoc eval
 could not show that.
 
-## Two design decisions worth knowing
+### Two design decisions worth knowing
 
 - **The constraint needs both classes.** Safe demos alone cannot define the
   boundary; C_θ is learned by contrast against unsafe rollouts. See
@@ -67,7 +109,7 @@ could not show that.
   C measures *did it do the job safely*. An LLM judge for R would blur the
   separation the method depends on.
 
-## Profiles
+### Profiles
 
 | Profile | Encoder | Policy | Env | Purpose |
 |---------|---------|--------|-----|---------|
@@ -85,11 +127,11 @@ reportable numbers.
 
 ```
 scripts/run_experiment.py     the driver (all stages)
-src/icrl_dual_training/               trajectory encoder + C_θ trainer
-src/lagrangian_finetuning/                 reward model, Lagrangian PPO, dual ascent, rollouts
+src/icrl_dual_training/               trajectory encoder, max-entropy ICRL constraint (maxent_constraint.py), one-shot C_θ trainers
+src/lagrangian_finetuning/                 GRPO forward step with dual ascent, reward models, Lagrangian PPO/DPO (earlier), rollouts
+scripts/run_secret_keeping_icrl_pipeline.py  secret-keeping: demos, base eval, icrl_loop (the method), baselines, evaluation
 src/trajectory_data/                     Trajectory dataclass, trace loaders, mock env
 scripts/slurm/                        cluster job templates (collection, training, sweep)
-src/gridworld/                    gridworld ICRL reference implementation
 ```
 
 Cluster setup, SuiteCRM/Apptainer, and SLURM specifics are covered in the

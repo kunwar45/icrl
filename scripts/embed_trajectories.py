@@ -49,7 +49,6 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
