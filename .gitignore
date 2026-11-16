@@ -87,3 +87,6 @@ Thumbs.db
 # Large regenerable artifacts belong on $SCRATCH, not in git
 output/**/*.pt
 logs/
+
+# Overleaf paper: its own git repo (remote = Overleaf)
+paper/
