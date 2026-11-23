@@ -1,4 +1,4 @@
-# ABOUTME: ICRL constraint for secret-keeping replies: oracle-expert vs policy demos, the one-shot classifier C_theta, and the max-entropy (Malik et al. 2021) feasibility phi used by the alternating ICRL loop
+# ABOUTME: ICRL constraint for secret-keeping chats: oracle-expert vs policy demos, the one-shot classifier baseline, and the max-entropy (Malik et al. 2021) feasibility C_theta(tau) = prod_t phi(s_t, a_t) over chat trajectories of any length, used by the alternating ICRL loop
 # ABOUTME: Use: expert, unsafe = oracle_demo_pairs(rows, pair_filter="higher_return"); train with machiavelli_step_constraint.train_step_constraint; reply_detector_eval(model, rows)
 """
 One demo row per training prompt holds 4 expert-prompt replies and 4 policy
@@ -9,12 +9,14 @@ reply's reward (`higher_return`) or simply differ from it (`any_different`).
 Neither filter reads a leak label; leak labels on policy replies are recorded
 for reporting only.
 
-The constraint model reads the nominal system prompt, the user message and the
-reply, so the expert and unsafe rows of a pair differ only in the reply.
+A chat is a trajectory tau = (s_1, a_1, ..., s_T, a_T); single-turn secret
+keeping is T = 1. Each step's text holds the nominal system prompt, the
+conversation so far and the reply, so the expert and policy trajectories of a
+pair differ only in their replies.
 
-Two constraint models live here. ReplyFeasibility + maxent_round is the ICRL
-one (Malik et al. 2021 max-entropy update against the CURRENT policy's samples,
-used by the icrl_loop stage). oracle_demo_pairs feeds the BASELINE one-shot
+Two constraint models live here. TrajectoryFeasibility + inverse_step is the
+ICRL one (Malik et al. 2021 max-entropy update against the CURRENT policy's
+samples, used by the icrl_loop stage). oracle_demo_pairs feeds the BASELINE one-shot
 supervised classifier (machiavelli_step_constraint.train_step_constraint),
 which is not ICRL.
 """
@@ -31,6 +33,7 @@ PAIR_FILTERS = ("higher_return", "any_different")
 
 
 def constraint_text(item: dict, reply: str) -> str:
+    """The encoder text of a T = 1 chat step; equals single_turn_trajectory(item, reply)[0]."""
     return f"SYSTEM: {system_prompt('nominal', item)}\nUSER: {item['user']}\nREPLY: {reply}"
 
 
@@ -131,43 +134,81 @@ def reply_detector_eval(model, rows: list[dict], replies_key: str = "replies") -
     }
 
 
-# ---- Max-entropy ICRL (Malik et al. 2021) feasibility over replies ----------
+# ---- Max-entropy ICRL (Malik et al. 2021) feasibility over chat trajectories ----
 #
-# The genuine ICRL constraint: a feasibility function phi(prompt, reply) in (0, 1),
-# cost = 1 - phi, fitted by maxent_constraint.maxent_constraint_update (expert
-# log-likelihood: raise phi on expert replies, lower it on the CURRENT policy's
-# replies, sparsity regulariser toward feasible). A reply is a one-step
-# trajectory, so each TrajectoryBatch row is its own trajectory.
+# A chat trajectory is tau = (s_1, a_1, ..., s_T, a_T): s_t is the system prompt,
+# the earlier turns and user message t; a_t is assistant reply t. The constraint
+# factorises over steps (Malik et al. 2021; survey Section 4.2),
+#
+#     C_theta(tau) = prod_t phi(s_t, a_t),   phi(s, a) = sigmoid(f(enc(s, a))),
+#
+# with cost 1 - C_theta(tau). Single-turn secret keeping is the case T = 1, where
+# C_theta(tau) = phi(x, y). phi is fitted by maxent_constraint.maxent_constraint_update
+# (raise feasibility on expert trajectories, lower it on the CURRENT policy's,
+# sparsity regulariser toward feasible), which already sums log phi per trajectory.
 
 
-def one_step_batch(embeddings):
-    """A TrajectoryBatch where every row is a one-step trajectory."""
+def step_texts(item: dict, turns: list[tuple[str, str]]) -> list[str]:
+    """One encoder text per step of a chat trajectory; turns[t] = (user message t, reply t).
+
+    Step t reads the nominal system prompt, the earlier turns, user message t and
+    reply t. For T = 1 this is exactly constraint_text(item, reply).
+    """
+    head = f"SYSTEM: {system_prompt('nominal', item)}"
+    out, history = [], ""
+    for user, reply in turns:
+        out.append(f"{head}\n{history}USER: {user}\nREPLY: {reply}")
+        history += f"USER: {user}\nREPLY: {reply}\n"
+    return out
+
+
+def single_turn_trajectory(item: dict, reply: str) -> list[str]:
+    """The T = 1 trajectory of a single-turn chat: one step, (item's user message, reply)."""
+    return step_texts(item, [(item["user"], reply)])
+
+
+def trajectory_batch(step_embeddings, lengths):
+    """A TrajectoryBatch from per-step embeddings, trajectory i owning the next lengths[i] rows."""
     import torch
 
     from src.icrl_dual_training.maxent_constraint import TrajectoryBatch
 
-    n = embeddings.size(0)
+    lengths = torch.as_tensor(lengths, dtype=torch.long)
+    if (lengths < 1).any():
+        raise ValueError("every trajectory needs at least one step")
+    if int(lengths.sum()) != step_embeddings.size(0):
+        raise ValueError(
+            f"lengths sum to {int(lengths.sum())} but there are {step_embeddings.size(0)} step embeddings"
+        )
+    owner = torch.repeat_interleave(torch.arange(lengths.numel()), lengths)
     return TrajectoryBatch(
-        embeddings=embeddings,
-        owner=torch.arange(n, device=embeddings.device),
-        n_trajectories=n,
+        embeddings=step_embeddings,
+        owner=owner.to(step_embeddings.device),
+        n_trajectories=int(lengths.numel()),
     )
 
 
-class ReplyFeasibility:
-    """Frozen encoder (embeds constraint_text) + StepFeasibilityHead phi; cost = 1 - phi."""
+def trajectory_lengths(batch):
+    """Number of steps in each trajectory of a TrajectoryBatch."""
+    import torch
+
+    return torch.bincount(batch.owner, minlength=batch.n_trajectories)
+
+
+class TrajectoryFeasibility:
+    """C_theta(tau) = prod_t phi(s_t, a_t): frozen encoder + StepFeasibilityHead phi; cost = 1 - C_theta."""
 
     def __init__(self, encoder, head, meta: dict):
         self.encoder, self.head, self.meta = encoder, head, meta
 
     @classmethod
-    def build(
-        cls, encoder_model: str, max_length: int, head_hidden: int, device=None
-    ):
+    def build(cls, encoder_model: str, max_length: int, head_hidden: int, device=None):
         from src.icrl_dual_training.machiavelli_step_constraint import StepConstraint
         from src.icrl_dual_training.maxent_constraint import StepFeasibilityHead
 
-        enc = StepConstraint.build(encoder_model, max_length, head_hidden, device=device)
+        enc = StepConstraint.build(
+            encoder_model, max_length, head_hidden, device=device
+        )
         dev = next(enc.encoder.backbone.parameters()).device
         head = StepFeasibilityHead(enc.encoder.hidden_size, head_hidden).to(dev)
         meta = {
@@ -186,7 +227,10 @@ class ReplyFeasibility:
 
         meta = json.loads((Path(out_dir) / "phi_meta.json").read_text())
         obj = cls.build(
-            meta["encoder_model"], meta["max_length"], meta["head_hidden"], device=device
+            meta["encoder_model"],
+            meta["max_length"],
+            meta["head_hidden"],
+            device=device,
         )
         obj.head.load_state_dict(
             torch.load(Path(out_dir) / "phi_head.pt", map_location="cpu")
@@ -213,64 +257,84 @@ class ReplyFeasibility:
         torch.save(self.head.state_dict(), out_dir / "phi_head.pt")
         (out_dir / "phi_meta.json").write_text(json.dumps(self.meta, indent=2))
 
-    def embed(self, texts: list[str], batch_size: int = 16):
-        return self.encoder.embed(texts, batch_size)
+    def embed(self, trajectories, batch_size: int = 16):
+        """TrajectoryBatch of step embeddings; each trajectory is a list of step texts (a str is T = 1)."""
+        trajs = [[t] if isinstance(t, str) else list(t) for t in trajectories]
+        flat = [s for t in trajs for s in t]
+        emb = self.encoder.embed(flat, batch_size)
+        return trajectory_batch(emb, [len(t) for t in trajs])
 
-    def costs_from_embeddings(self, emb) -> list[float]:
+    def costs(self, batch) -> list[float]:
+        """1 - C_theta(tau) = 1 - prod_t phi(s_t, a_t) per trajectory (high = infeasible)."""
         import torch
+
+        from src.icrl_dual_training.maxent_constraint import trajectory_log_feasibility
 
         with torch.no_grad():
             dev = next(self.head.parameters()).device
-            return (1.0 - self.head(emb.to(dev))).float().cpu().tolist()
+            log_c = trajectory_log_feasibility(self.head, batch.to(dev))
+            return (1.0 - log_c.exp()).float().cpu().tolist()
 
-    def score(self, texts: list[str], batch_size: int = 16) -> list[float]:
-        """Cost 1 - phi per text (high = infeasible); the interface reply_detector_eval expects."""
-        if not texts:
+    def score(self, trajectories, batch_size: int = 16) -> list[float]:
+        """Cost per trajectory; a plain str is a T = 1 trajectory (the interface reply_detector_eval uses)."""
+        if not trajectories:
             return []
-        return self.costs_from_embeddings(self.embed(texts, batch_size))
-
-
-def maxent_round(phi: ReplyFeasibility, expert_emb, nominal_emb, mcfg) -> dict:
-    """One inverse step of Malik et al. on cached embeddings; updates phi.head in place."""
-    from src.icrl_dual_training.maxent_constraint import maxent_constraint_update
-
-    return maxent_constraint_update(
-        phi.head, one_step_batch(expert_emb), one_step_batch(nominal_emb), mcfg
-    )
+        return self.costs(self.embed(trajectories, batch_size))
 
 
 INVERSE_METHODS = ("maxent", "maxent_paired", "pucl")
 
 
-def paired_maxent_update(head, expert_emb, nominal_emb, pair_expert_idx, cfg, rank_weight: float) -> dict:
-    """Malik et al. max-entropy update plus a same-context ranking term.
+def _logit_from_log(log_c):
+    """logit C from log C, i.e. log C - log(1 - C); finite because phi is clamped below 1."""
+    import torch
+
+    return log_c - torch.log1p(-log_c.exp())
+
+
+def paired_maxent_update(
+    head, expert, nominal, pair_expert_idx, cfg, rank_weight: float
+) -> dict:
+    """Malik et al. max-entropy update plus a same-context ranking term, over trajectories.
 
     The plain update can lower feasibility on a whole CONTEXT (every reply to an
-    attack chat) instead of on the replies the expert avoids, which leaves no
-    contrast inside a GRPO group. The ranking term -log sigma(logit phi(expert
-    reply) - logit phi(policy reply)), over pairs from the same chat, forces the
-    feasibility to differ between replies to the same context.
-    pair_expert_idx[i] is the expert row for nominal row i's chat, or -1.
+    attack chat) instead of on the trajectories the expert avoids, which leaves no
+    contrast inside a GRPO group. The ranking term
+    -log sigma(logit C(expert tau) - logit C(policy tau)), over pairs from the same
+    chat, forces the feasibility to differ between trajectories from one context.
+    expert and nominal are TrajectoryBatches; pair_expert_idx[i] is the expert
+    trajectory for nominal trajectory i's chat, or -1.
     """
     import torch
     import torch.nn.functional as F
 
+    from src.icrl_dual_training.maxent_constraint import trajectory_log_feasibility
+
     device = next(head.parameters()).device
-    e, n = expert_emb.to(device), nominal_emb.to(device)
-    paired = (pair_expert_idx >= 0).nonzero(as_tuple=True)[0]
+    e, n = expert.to(device), nominal.to(device)
+    pair = pair_expert_idx.to(device)
+    paired = (pair >= 0).nonzero(as_tuple=True)[0]
     opt = torch.optim.AdamW(head.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     b = cfg.batch_trajectories
     for _ in range(cfg.n_steps):
-        ei = torch.randint(0, e.shape[0], (min(b, e.shape[0]),), device=device)
-        ni = torch.randint(0, n.shape[0], (min(b, n.shape[0]),), device=device)
-        log_e = torch.log(head(e[ei]).clamp(1e-6, 1 - 1e-6))
-        log_n = torch.log(head(n[ni]).clamp(1e-6, 1 - 1e-6))
+        # log C for every trajectory, then index: keeps pair order and repeated draws
+        lc_e = trajectory_log_feasibility(head, e)
+        lc_n = trajectory_log_feasibility(head, n)
+        ei = torch.randint(
+            0, e.n_trajectories, (min(b, e.n_trajectories),), device=device
+        )
+        ni = torch.randint(
+            0, n.n_trajectories, (min(b, n.n_trajectories),), device=device
+        )
+        log_e, log_n = lc_e[ei], lc_n[ni]
         likelihood = cfg.beta * (log_e.mean() - log_n.mean())
         sparsity = (1 - log_e.exp()).mean() + (1 - log_n.exp()).mean()
-        pi = paired[torch.randint(0, paired.numel(), (min(b, paired.numel()),), device=paired.device)].to(device)
-        pe = head(e[pair_expert_idx.to(device)[pi]]).clamp(1e-6, 1 - 1e-6)
-        pn = head(n[pi]).clamp(1e-6, 1 - 1e-6)
-        rank = -F.logsigmoid(torch.logit(pe) - torch.logit(pn)).mean()
+        pi = paired[
+            torch.randint(0, paired.numel(), (min(b, paired.numel()),), device=device)
+        ]
+        rank = -F.logsigmoid(
+            _logit_from_log(lc_e[pair[pi]]) - _logit_from_log(lc_n[pi])
+        ).mean()
         loss = -likelihood + cfg.sparsity_coeff * sparsity + rank_weight * rank
         opt.zero_grad()
         loss.backward()
@@ -280,33 +344,59 @@ def paired_maxent_update(head, expert_emb, nominal_emb, pair_expert_idx, cfg, ra
         return {
             "loss": float(loss),
             "rank_loss": float(rank),
-            "mean_phi_expert": float(head(e).mean()),
-            "mean_phi_nominal": float(head(n).mean()),
-            "n_expert": int(e.shape[0]),
-            "n_nominal": int(n.shape[0]),
+            "mean_C_expert": float(trajectory_log_feasibility(head, e).exp().mean()),
+            "mean_C_nominal": float(trajectory_log_feasibility(head, n).exp().mean()),
+            "n_expert": int(e.n_trajectories),
+            "n_nominal": int(n.n_trajectories),
             "n_pairs": int(paired.numel()),
         }
 
 
-def inverse_step(phi, expert_emb, nominal_emb, pair_expert_idx, ic, mcfg, memory=None):
-    """One ICRL inverse step, by ic.inverse_method; returns (stats, new PUCL memory or None)."""
-    from src.icrl_dual_training.maxent_constraint import pucl_constraint_update
+def inverse_step(
+    phi,
+    expert,
+    nominal,
+    pair_expert_idx,
+    ic,
+    mcfg,
+    memory=None,
+    heldout=None,
+    return_selected=False,
+):
+    """One ICRL inverse step on TrajectoryBatches, by ic.inverse_method; returns (stats, new PUCL memory or None).
+
+    The new memory is the old one with this round's reliable negatives appended at the end.
+    `heldout` (held-out demonstration step embeddings) is needed by mcfg.pucl_selection='heldout_quantile'.
+    With `return_selected`, PUCL's stats keep "selected_indices" (into `nominal`) for audits.
+    """
+    import torch
+
+    from src.icrl_dual_training.maxent_constraint import (
+        maxent_constraint_update,
+        pucl_constraint_update,
+    )
 
     method = str(ic.get("inverse_method", "maxent"))
     if method not in INVERSE_METHODS:
-        raise ValueError(f"icrl.inverse_method must be one of {INVERSE_METHODS}, got {method}")
+        raise ValueError(
+            f"icrl.inverse_method must be one of {INVERSE_METHODS}, got {method}"
+        )
     if method == "maxent":
-        return maxent_round(phi, expert_emb, nominal_emb, mcfg), None
+        return maxent_constraint_update(phi.head, expert, nominal, mcfg), None
     if method == "maxent_paired":
         return paired_maxent_update(
-            phi.head, expert_emb, nominal_emb, pair_expert_idx, mcfg, float(ic.rank_weight)
+            phi.head, expert, nominal, pair_expert_idx, mcfg, float(ic.rank_weight)
         ), None
-    # PUCL (Peng & Billard 2024): reliable negatives by distance to the demonstrations,
-    # cross-entropy against them, memory of past rounds' negatives. One-step
-    # trajectories, so no per-trajectory expansion.
+    # PUCL (Peng & Billard 2024): reliable negative steps by distance to the
+    # demonstrations, cross-entropy against them, memory of past rounds' negatives.
+    # Eq. 4's expansion adds one step per policy trajectory; with T = 1 that would add
+    # every step, so it runs only when some trajectory has more than one step.
+    expand = bool((trajectory_lengths(nominal) > 1).any())
     stats, mem = pucl_constraint_update(
-        phi.head, one_step_batch(expert_emb), one_step_batch(nominal_emb), mcfg,
-        memory=memory, expand=False,
+        phi.head, expert, nominal, mcfg, memory=memory, expand=expand, heldout=heldout
     )
-    new_memory = mem if memory is None else __import__("torch").cat([memory, mem])
+    selected = stats.pop("selected_indices", None)
+    if return_selected:
+        stats["selected_indices"] = selected
+    new_memory = mem if memory is None else torch.cat([memory, mem])
     return stats, new_memory

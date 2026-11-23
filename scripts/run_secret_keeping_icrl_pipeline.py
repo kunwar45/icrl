@@ -500,18 +500,18 @@ def stage_sft(cfg, out: Path, smoke: bool) -> None:
 
 
 def phi_eval_on_test(cfg, out: Path, state: dict) -> dict | None:
-    """ICRL loop only: the final round's cost 1 - phi against the exact check, on base and tuned test replies."""
+    """ICRL loop only: the final round's cost 1 - C_theta against the exact check, on base and tuned test replies."""
     if state.get("method") != "icrl_loop":
         return None
     p = out / "icrl_phi_eval.json"
     if p.exists():
         return json.loads(p.read_text())
     from src.icrl_dual_training.secret_keeping_reply_constraint import (
-        ReplyFeasibility,
+        TrajectoryFeasibility,
         reply_detector_eval,
     )
 
-    phi = ReplyFeasibility.load(
+    phi = TrajectoryFeasibility.load(
         Path(state["phi_dir"]), device=cfg.constraint.get("device")
     )
     res = {}
@@ -539,9 +539,10 @@ def stage_icrl_loop(cfg, out: Path, smoke: bool) -> None:
     )
     from src.icrl_dual_training.maxent_constraint import MaxEntConstraintConfig
     from src.icrl_dual_training.secret_keeping_reply_constraint import (
-        ReplyFeasibility,
-        constraint_text,
+        TrajectoryFeasibility,
         inverse_step,
+        single_turn_trajectory,
+        trajectory_batch,
     )
     from src.lagrangian_finetuning.secret_keeping_constrained_dpo import sample_replies
     from src.lagrangian_finetuning.secret_keeping_constrained_grpo import grpo_train
@@ -569,18 +570,20 @@ def stage_icrl_loop(cfg, out: Path, smoke: bool) -> None:
         }
     )
     rows = load_rows(out / "demos" / "rows.jsonl")
-    # one expert reply per chat that has one, in row order, so policy samples can be
-    # paired with their own chat's expert reply (same-chat ranking)
+    # one expert trajectory per chat that has one, in row order, so policy samples can
+    # be paired with their own chat's expert trajectory (same-chat ranking). Each is a
+    # list of step texts; single-turn secret keeping gives T = 1.
     expert_rows = [r for r in rows if r.get("expert_pick") is not None]
-    expert_texts = [
-        constraint_text(r, r["expert_replies"][r["expert_pick"]]) for r in expert_rows
+    expert_trajs = [
+        single_turn_trajectory(r, r["expert_replies"][r["expert_pick"]])
+        for r in expert_rows
     ]
     expert_index = {r["id"]: i for i, r in enumerate(expert_rows)}
     items = make_prompts(
         "train", int(d.train_prompts), int(d.seed), float(d.attack_share)
     )
     log(
-        f"icrl_loop: {K} rounds x {N} GRPO steps; {len(expert_texts)} expert replies; "
+        f"icrl_loop: {K} rounds x {N} GRPO steps; {len(expert_trajs)} expert trajectories; "
         f"{len(items)} training chats, {int(ic.k)} policy samples each per round"
     )
     judge_cfg = OmegaConf.merge(
@@ -601,7 +604,7 @@ def stage_icrl_loop(cfg, out: Path, smoke: bool) -> None:
             reps = sample_replies(items, pol, "nominal", int(ic.k), int(s.workers))
         samples = [
             {
-                "text": constraint_text(it, x),
+                "trajectory": single_turn_trajectory(it, x),
                 "kind": it["kind"],
                 "id": it["id"],
                 "violates": leaks(x, it["secret"]),
@@ -614,7 +617,7 @@ def stage_icrl_loop(cfg, out: Path, smoke: bool) -> None:
             [{**it, "replies": rs} for it, rs in zip(items, reps)],
         )
         # 2. inverse step: max-ent constraint update on phi, warm-started
-        phi = ReplyFeasibility.build(
+        phi = TrajectoryFeasibility.build(
             str(c.encoder_model),
             int(c.max_length),
             int(c.head_hidden),
@@ -624,11 +627,18 @@ def stage_icrl_loop(cfg, out: Path, smoke: bool) -> None:
             phi.load_head(st["phi_dir"])
         e_cache = out / "icrl_expert_embeddings_by_chat.pt"
         if e_cache.exists():
-            e_emb = torch.load(e_cache, map_location="cpu")
+            cached = torch.load(e_cache, map_location="cpu")
+            if isinstance(cached, dict):
+                e_emb = trajectory_batch(cached["embeddings"], cached["lengths"])
+            else:  # caches written before trajectories: one step per expert reply
+                e_emb = trajectory_batch(cached, [1] * cached.size(0))
         else:
-            e_emb = phi.embed(expert_texts).cpu()
-            torch.save(e_emb, e_cache)
-        n_emb = phi.embed([x["text"] for x in samples]).cpu()
+            e_emb = phi.embed(expert_trajs).to("cpu")
+            torch.save(
+                {"embeddings": e_emb.embeddings, "lengths": [len(t) for t in expert_trajs]},
+                e_cache,
+            )
+        n_emb = phi.embed([x["trajectory"] for x in samples]).to("cpu")
         mcfg = MaxEntConstraintConfig(
             beta=float(ic.beta),
             sparsity_coeff=float(ic.sparsity_coeff),
@@ -650,7 +660,7 @@ def stage_icrl_loop(cfg, out: Path, smoke: bool) -> None:
         )
         if memory is not None:
             torch.save(memory, mem_p)
-        costs = phi.costs_from_embeddings(n_emb)
+        costs = phi.costs(n_emb)
         audit = reply_detector_eval_from_costs(samples, costs)
         phi_dir = rdir / "phi"
         phi.save(phi_dir)

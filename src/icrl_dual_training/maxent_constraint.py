@@ -171,19 +171,27 @@ def select_reliable_negatives(
 
 
 def subset(batch: TrajectoryBatch, keep: torch.Tensor) -> TrajectoryBatch:
-    """Restrict a batch to a set of trajectory indices, renumbering owners."""
-    keep_sorted, _ = torch.sort(keep)
-    mapping = torch.full(
-        (batch.n_trajectories,), -1, dtype=torch.long, device=batch.owner.device
-    )
-    mapping[keep_sorted] = torch.arange(len(keep_sorted), device=batch.owner.device)
-    mask = mapping[batch.owner] >= 0
+    """The trajectories at indices `keep`, in that order; trajectory j of the result is batch trajectory keep[j].
+
+    Repeated indices give repeated trajectories, so minibatches drawn with
+    replacement (torch.randint) keep their size and every draw has its steps.
+    """
+    device = batch.owner.device
+    keep = keep.to(device=device, dtype=torch.long)
+    counts = torch.bincount(batch.owner, minlength=batch.n_trajectories)
+    starts = torch.cumsum(counts, 0) - counts  # first row of each trajectory in `order`
+    order = torch.argsort(batch.owner, stable=True)  # rows grouped by trajectory
+    lens = counts[keep]
+    new_owner = torch.repeat_interleave(torch.arange(keep.numel(), device=device), lens)
+    first = torch.repeat_interleave(torch.cumsum(lens, 0) - lens, lens)
+    offset = torch.arange(int(lens.sum()), device=device) - first
+    rows = order[starts[keep][new_owner] + offset]
     return TrajectoryBatch(
-        embeddings=batch.embeddings[mask],
-        owner=mapping[batch.owner[mask]],
-        n_trajectories=len(keep_sorted),
+        embeddings=batch.embeddings[rows],
+        owner=new_owner,
+        n_trajectories=int(keep.numel()),
         log_prob_ratio=(
-            None if batch.log_prob_ratio is None else batch.log_prob_ratio[keep_sorted]
+            None if batch.log_prob_ratio is None else batch.log_prob_ratio[keep]
         ),
     )
 
@@ -200,6 +208,12 @@ class MaxEntConstraintConfig:
     """'all' for the plain Malik update, 'pucl' to keep only reliable negatives."""
     pucl_keep_fraction: float = 0.5
     """Share of the nominal pool used as negatives when negative_selection='pucl'."""
+    pucl_selection: str = "fraction"
+    """'fraction': the pucl_keep_fraction farthest nominal steps (PUCL as published).
+    'heldout_quantile': nominal steps farther from the demonstrations than the
+    pucl_quantile of held-out demonstrations are (needs held-out embeddings)."""
+    pucl_quantile: float = 0.99
+    """Quantile of held-out demonstrations' distances used as the threshold."""
     pucl_k: int = 2
     """Neighbours in the PUCL distance rule; the paper recommends 1-3."""
     batch_steps: int = 256
@@ -352,7 +366,10 @@ def standardise_together(
 
 
 def knn_distance_to_demonstrations(
-    expert_steps: torch.Tensor, nominal_steps: torch.Tensor, k: int = 2, chunk: int = 2048
+    expert_steps: torch.Tensor,
+    nominal_steps: torch.Tensor,
+    k: int = 2,
+    chunk: int = 2048,
 ) -> torch.Tensor:
     """PUCL Eq. 2: mean distance from each unlabelled step to its k nearest
     demonstration steps. A step far from everything the expert ever did is the
@@ -374,9 +391,9 @@ def reliable_infeasible_steps(
 ) -> torch.Tensor:
     """PUCL Eqs. 2-4: indices of the nominal STEPS that are reliably infeasible.
 
-    `percentile` is the share of the unlabelled pool kept, which the paper calls
-    the user's belief about the size of the true infeasible region: lower keeps
-    more and yields a more conservative constraint. `expand` adds, from every
+    `percentile` is the share of the unlabelled pool kept (the farthest ones), which
+    the paper relates to the user's belief about the size of the true infeasible
+    region: higher keeps more. `expand` adds, from every
     policy trajectory, the step closest to the selected set, which the paper
     includes because a demonstration hugging the true boundary otherwise leaves
     a gap between the learned and the true one.
@@ -404,6 +421,33 @@ def reliable_infeasible_steps(
     return torch.unique(idx)
 
 
+def heldout_quantile_infeasible_steps(
+    expert: TrajectoryBatch,
+    heldout: torch.Tensor,
+    nominal: TrajectoryBatch,
+    quantile: float = 0.99,
+    k: int = 2,
+) -> tuple[torch.Tensor, float]:
+    """Nominal steps farther from the demonstrations than `quantile` of held-out demonstrations are.
+
+    Same distance rule as PUCL Eq. 2 (mean distance to the k nearest demonstration
+    steps, after standardising demonstrations and nominal together), but the cut is
+    a fixed line calibrated on demonstrations the head never trains on, instead of a
+    fixed share of the nominal pool: how many steps cross it follows the policy.
+    Returns (indices, threshold distance).
+    """
+    both = torch.cat([expert.embeddings, nominal.embeddings], dim=0)
+    mu = both.mean(0, keepdim=True)
+    sd = both.std(0, keepdim=True).clamp(min=1e-6)
+    e_std = (expert.embeddings - mu) / sd
+    n_std = (nominal.embeddings - mu) / sd
+    h_std = (heldout.to(e_std.device) - mu) / sd
+    held_d = knn_distance_to_demonstrations(e_std, h_std, k=k)
+    threshold = float(torch.quantile(held_d.float(), float(quantile)))
+    nom_d = knn_distance_to_demonstrations(e_std, n_std, k=k)
+    return (nom_d > threshold).nonzero(as_tuple=True)[0], threshold
+
+
 def pucl_constraint_update(
     head: StepFeasibilityHead,
     expert: TrajectoryBatch,
@@ -412,24 +456,56 @@ def pucl_constraint_update(
     memory: torch.Tensor | None = None,
     optimizer: torch.optim.Optimizer | None = None,
     expand: bool = True,
+    heldout: torch.Tensor | None = None,
 ) -> tuple[dict, torch.Tensor]:
     """PUCL Eq. 5: cross-entropy on demonstrations against reliable negatives.
 
     Returns the training statistics and the memory buffer of reliable-infeasible
     step embeddings, to be carried into the next round as the paper prescribes.
+    With cfg.pucl_selection='heldout_quantile' the negatives are chosen by
+    heldout_quantile_infeasible_steps (needs `heldout`, held-out demonstration step
+    embeddings). With no negatives at all (none selected, empty memory) the head is
+    left as it is.
     """
     device = next(head.parameters()).device
     expert, nominal = expert.to(device), nominal.to(device)
     opt = optimizer or torch.optim.AdamW(
         head.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay
     )
-    idx = reliable_infeasible_steps(
-        expert, nominal, percentile=cfg.pucl_keep_fraction, k=cfg.pucl_k, expand=expand
-    )
+    threshold = None
+    if cfg.pucl_selection == "heldout_quantile":
+        if heldout is None:
+            raise ValueError(
+                "pucl_selection='heldout_quantile' needs held-out demonstrations"
+            )
+        idx, threshold = heldout_quantile_infeasible_steps(
+            expert, heldout, nominal, quantile=cfg.pucl_quantile, k=cfg.pucl_k
+        )
+    elif cfg.pucl_selection == "fraction":
+        idx = reliable_infeasible_steps(
+            expert,
+            nominal,
+            percentile=cfg.pucl_keep_fraction,
+            k=cfg.pucl_k,
+            expand=expand,
+        )
+    else:
+        raise ValueError(f"unknown pucl_selection {cfg.pucl_selection!r}")
     neg = nominal.embeddings[idx]
     if memory is not None and memory.numel():
         neg = torch.cat([neg, memory.to(device)])
     pos = expert.embeddings
+    if neg.shape[0] == 0:
+        return {
+            "loss": None,
+            "skipped": "no reliable negatives and an empty memory",
+            "n_expert_steps": int(pos.shape[0]),
+            "n_unlabelled_steps": int(nominal.embeddings.shape[0]),
+            "n_reliable_negative_steps": 0,
+            "n_memory_steps": 0 if memory is None else int(memory.shape[0]),
+            "selection_threshold": threshold,
+            "selected_indices": [int(i) for i in idx.tolist()],  # into nominal; for audits
+        }, nominal.embeddings[idx].detach().cpu()
 
     for step in range(cfg.n_steps):
         p_idx = torch.randint(0, pos.shape[0], (min(cfg.batch_steps, pos.shape[0]),))
@@ -455,5 +531,7 @@ def pucl_constraint_update(
             "n_memory_steps": 0 if memory is None else int(memory.shape[0]),
             "mean_phi_expert": float(head(pos).mean()),
             "mean_phi_reliable_negative": float(head(neg).mean()),
+            "selection_threshold": threshold,
+            "selected_indices": [int(i) for i in idx.tolist()],  # into nominal; for audits
         }
     return stats, nominal.embeddings[idx].detach().cpu()

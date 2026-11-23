@@ -1,0 +1,44 @@
+# ABOUTME: Countdown-Code SFT priming: fine-tunes Qwen2.5-7B-Instruct on the released o4-mini demonstrations and merges the result; every Countdown-Code arm starts from this model
+# ABOUTME: Run: CONFIG=configs/lagrangian_finetuning/countdown_code_sft_priming_qwen7b.yaml via scripts/slurm/run_single_turn_icrl_pipeline_job.sh (stage sft_prime)
+benchmark: countdown_code
+run_name: countdown_code_sft_priming_qwen7b_v1
+
+data:
+  dir: ${oc.env:SCRATCH}/icrl/countdown_code/data   # built by scripts/prepare_countdown_code_data.py
+  train_prompts: 4000          # RL problems, unseen in the demonstrations (Countdown-Code protocol)
+  test_prompts: 500
+  demonstrations: null         # all proxy-passing o4-mini traces (~1.2% of them hack; not filtered)
+
+policy:
+  model: Qwen/Qwen2.5-7B-Instruct
+  serve:
+    replicas: ["0", "1", "2", "3"]
+    tensor_parallel: 1
+    max_model_len: 4096
+    max_num_seqs: 128
+    gpu_fraction: 0.85
+    reasoning_parser: null
+    tool_call_parser: null
+
+sampling:
+  temperature: 0.7
+  max_tokens: 2048
+  workers: 64
+  timeout_s: 1800
+
+sft:                           # Countdown-Code paper, Appendix C
+  gpus: "0,1,2,3"
+  lora_r: 128
+  lora_alpha: 128
+  lora_dropout: 0.0
+  lora_target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  lr: 1.0e-4
+  epochs: 5
+  per_device_batch: 4          # 4 GPUs x 4 = batch 16
+  grad_accum: 1
+  max_length: 2048
+  seed: 0
+  merged_dir: ${oc.env:SCRATCH}/icrl/countdown_code/sft_primed_qwen2.5_7b
+
+output:
+  dir: ${oc.env:SCRATCH}/icrl/countdown_code/${run_name}

@@ -50,7 +50,9 @@ a constraint update and a constrained policy update. Config
 1. **Sample the current policy**: 4 replies per training chat (8,000), no
    filtering.
 2. **Inverse step**: feasibility φ_ω(x, y) = σ(MLP(e(x, y))), e = mean-pooled
-   final hidden state of frozen Qwen2.5-1.5B, cost c = 1 − φ. Maximise
+   final hidden state of frozen Qwen2.5-1.5B, cost c = 1 − φ. In general a chat
+   is a trajectory τ = (s_1, a_1, …, s_T, a_T) with C(τ) = ∏_t φ(s_t, a_t) and cost
+   1 − C(τ) (`TrajectoryFeasibility`); a single-turn chat is T = 1, so C = φ(x, y). Maximise
    β E_expert[log φ] − β E_policy[log φ] − δ E[1 − φ] (β = 1, δ = 0.05),
    1,000 steps in round 0, 300 warm-started steps after
    (`maxent_constraint.maxent_constraint_update` via

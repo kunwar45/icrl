@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 : "${CONFIG:?set CONFIG to a configs/lagrangian_finetuning/secret_keeping_*.yaml file}"
 # Per-cluster defaults; any of these can be overridden from the environment.
 case "$(hostname -f 2>/dev/null || hostname)" in
-  *killarney*)
+  *killarney*|klogin*|*vectorinstitute*)   # killarney login nodes are klogin0N.paice.vectorinstitute.ai
     : "${ICRL_ACCOUNT:=aip-s2ganapa}"
     : "${ICRL_VENV:=/project/aip-s2ganapa/kunwar/venvs/icrl_v4}"
     : "${HF_HOME:=/project/aip-s2ganapa/kunwar/hf_cache}" ;;

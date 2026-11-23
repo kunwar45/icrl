@@ -146,6 +146,22 @@ def test_subset_renumbers_owners_consistently():
     assert sorted(set(s.owner.tolist())) == [0, 1]
 
 
+def test_subset_keeps_requested_order_and_repeated_draws():
+    """Sampling with replacement must not create empty (C = 1) trajectories."""
+    a, b_, c = torch.randn(DIM), torch.randn(DIM), torch.randn(DIM)
+    b = make_batch([[a] * 2, [b_] * 3, [c]])
+    s = subset(b, torch.tensor([2, 0, 2]))
+    assert s.n_trajectories == 3
+    assert torch.bincount(s.owner, minlength=3).tolist() == [1, 2, 1]
+    assert torch.equal(s.embeddings[s.owner == 0][0], c)
+    assert torch.equal(s.embeddings[s.owner == 1][0], a)
+    assert torch.equal(s.embeddings[s.owner == 2][0], c)
+    # steps that arrive interleaved are still grouped under the right trajectory
+    mixed = TrajectoryBatch(torch.stack([a, b_, a, c]), torch.tensor([0, 1, 0, 2]), 3)
+    m = subset(mixed, torch.tensor([0]))
+    assert m.embeddings.shape[0] == 2 and torch.equal(m.embeddings[1], a)
+
+
 def test_pucl_distance_rule_finds_the_violating_steps_without_a_trained_head():
     """PUCL's step 1 uses distance to the demonstrations, not the model's own
     scores, so it works before the head has learned anything. That is the whole
@@ -157,7 +173,9 @@ def test_pucl_distance_rule_finds_the_violating_steps_without_a_trained_head():
     clean_like, _ = separable_pools(n=20, seed=2)
     mixed = TrajectoryBatch(
         embeddings=torch.cat([clean_like.embeddings, violating.embeddings]),
-        owner=torch.cat([clean_like.owner, violating.owner + clean_like.n_trajectories]),
+        owner=torch.cat(
+            [clean_like.owner, violating.owner + clean_like.n_trajectories]
+        ),
         n_trajectories=clean_like.n_trajectories + violating.n_trajectories,
     )
     n_clean_steps = clean_like.embeddings.shape[0]
@@ -193,3 +211,41 @@ def test_pucl_memory_buffer_is_carried_into_the_next_round():
     _, memory = pucl_constraint_update(head, expert, nominal, cfg)
     stats2, _ = pucl_constraint_update(head, expert, nominal, cfg, memory=memory)
     assert stats2["n_memory_steps"] == memory.shape[0]
+
+
+def test_heldout_quantile_marks_few_from_the_demonstration_distribution_and_all_outliers():
+    from src.icrl_dual_training.maxent_constraint import heldout_quantile_infeasible_steps
+
+    g = torch.Generator().manual_seed(0)
+    demo = lambda n: [[torch.randn(DIM, generator=g)] for _ in range(n)]  # noqa: E731
+    expert = make_batch(demo(400))
+    heldout = make_batch(demo(200)).embeddings
+    like_demos = make_batch(demo(200))
+    idx, thr = heldout_quantile_infeasible_steps(expert, heldout, like_demos, quantile=0.99)
+    assert thr > 0 and idx.numel() <= 10  # about 1% of same-distribution replies cross the line
+    far = make_batch(demo(190) + [[6.0 + torch.randn(DIM, generator=g)] for _ in range(10)])
+    idx, _ = heldout_quantile_infeasible_steps(expert, heldout, far, quantile=0.99)
+    assert set(range(190, 200)) <= set(idx.tolist())  # every outlier is marked
+
+
+def test_pucl_with_no_negatives_leaves_the_head_alone():
+    from src.icrl_dual_training.maxent_constraint import pucl_constraint_update
+
+    torch.manual_seed(0)
+    head = StepFeasibilityHead(DIM)
+    before = [p.clone() for p in head.parameters()]
+    g = torch.Generator().manual_seed(1)
+    expert = make_batch([[torch.randn(DIM, generator=g)] for _ in range(300)])
+    heldout = make_batch([[torch.randn(DIM, generator=g)] for _ in range(100)]).embeddings
+    nominal = make_batch([[0.01 * torch.randn(DIM, generator=g)] for _ in range(20)])  # at the centre
+    cfg = MaxEntConstraintConfig(
+        n_steps=20, pucl_selection="heldout_quantile", pucl_quantile=0.99
+    )
+    stats, mem = pucl_constraint_update(head, expert, nominal, cfg, heldout=heldout)
+    assert stats["n_reliable_negative_steps"] == 0 and stats["skipped"]
+    assert mem.shape[0] == 0
+    assert all(torch.equal(a, b) for a, b in zip(before, head.parameters()))
+
+
+def test_fraction_selection_is_still_the_default():
+    assert MaxEntConstraintConfig().pucl_selection == "fraction"

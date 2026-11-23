@@ -105,12 +105,12 @@ class Rewards:
             dev = f"cuda:{rank}"
             self.cmodel = StepConstraint.load(Path(cfg.rl.constraint_dir), device=dev)
         elif self.cost == "maxent_feasibility":
-            # ICRL loop: cost = 1 - phi from the current round's inverse step
+            # ICRL loop: cost = 1 - C_theta(tau) from the current round's inverse step
             from src.icrl_dual_training.secret_keeping_reply_constraint import (
-                ReplyFeasibility,
+                TrajectoryFeasibility,
             )
 
-            self.phi = ReplyFeasibility.load(Path(cfg.rl.phi_dir), device=f"cuda:{rank}")
+            self.phi = TrajectoryFeasibility.load(Path(cfg.rl.phi_dir), device=f"cuda:{rank}")
         # Lagrangian dual ascent on lambda (rl.dual = {lr, epsilon, max}); without
         # it the cost is weighted by the fixed rl.lambda_c through reward_weights.
         self.dual = cfg.rl.get("dual")
@@ -169,6 +169,7 @@ class Rewards:
         from src.environments.secret_keeping.secret_keeping_adapter import leaks
         from src.icrl_dual_training.secret_keeping_reply_constraint import (
             constraint_text,
+            single_turn_trajectory,
         )
 
         replies = [_reply_text(c) for c in completions]
@@ -183,8 +184,10 @@ class Rewards:
                 [constraint_text(it, r) for it, r in zip(items, replies)], batch_size=32
             )
         elif self.cost == "maxent_feasibility":
+            # each completion is a single-turn chat: a trajectory of length T = 1
             C = self.phi.score(
-                [constraint_text(it, r) for it, r in zip(items, replies)], batch_size=32
+                [single_turn_trajectory(it, r) for it, r in zip(items, replies)],
+                batch_size=32,
             )
         elif self.cost == "exact_leak":
             C = [float(g) for g in gt]
@@ -357,6 +360,13 @@ def _worker(cfg_path: Path, out_dir: Path) -> None:
     )
     # Continue an earlier run: its checkpoint (adapter, optimizer, step count) is
     # resumed and training runs on until rl.max_steps.
+    if rl.get("keep_adapter_checkpoints", True):
+        # a copy of the adapter at every save (save_steps), kept beyond save_total_limit for publishing
+        from src.lagrangian_finetuning.adapter_checkpoint_keeping import (
+            keep_adapter_checkpoints_callback,
+        )
+
+        trainer.add_callback(keep_adapter_checkpoints_callback(out_dir / "adapter_checkpoints"))
     resume = rl.get("resume_from_checkpoint")
     if resume and rank == 0:
         print(f"resuming from {resume}", flush=True)

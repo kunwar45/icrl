@@ -1,0 +1,56 @@
+# ABOUTME: Countdown-Code baseline, no intervention, long: continues countdown_code_no_intervention_qwen7b_v1 from its step-300 checkpoint to 1,250 GRPO steps to test whether reward hacking emerges with more training
+# ABOUTME: Run: CONFIG=configs/lagrangian_finetuning/countdown_code_no_intervention_long_qwen7b.yaml STAGES=train,evaluate via scripts/slurm/run_single_turn_icrl_pipeline_job.sh
+benchmark: countdown_code
+run_name: countdown_code_no_intervention_long_qwen7b_v1
+
+data:
+  dir: ${oc.env:SCRATCH}/icrl/countdown_code/data   # built by scripts/prepare_countdown_code_data.py
+  train_prompts: 4000          # RL problems, unseen in the demonstrations (Countdown-Code protocol)
+  test_prompts: 500
+  demonstrations: null         # all proxy-passing o4-mini traces (~1.2% of them hack; not filtered)
+
+policy:
+  model: ${oc.env:SCRATCH}/icrl/countdown_code/sft_primed_qwen2.5_7b
+  serve:
+    replicas: ["0", "1", "2", "3"]
+    tensor_parallel: 1
+    max_model_len: 4096
+    max_num_seqs: 128
+    gpu_fraction: 0.85
+    reasoning_parser: null
+    tool_call_parser: null
+
+sampling:
+  temperature: 0.7
+  max_tokens: 2048
+  workers: 64
+  timeout_s: 1800
+
+rl:
+  signal: task_only
+  train_gpus: "0,1,2,3"        # all four GPUs: this arm has no monitor on the fourth
+  num_generations: 8           # rollouts per prompt (Countdown-Code paper)
+  per_device_batch: 2
+  grad_accum: 15               # 4 GPUs x 2 x 15 = 120 replies = 15 prompts per step, as in the first 300 steps
+  steps_per_generation: 30     # one generation feeds 2 optimizer steps, as in the Countdown-Code authors' config (2 minibatches per rollout batch)
+  max_steps: 1250              # about the authors' number of steps (10 epochs of 4,000 problems at 32 per step)
+  save_steps: 50
+  resume_from_checkpoint: ${oc.env:SCRATCH}/icrl/countdown_code/countdown_code_no_intervention_qwen7b_v1/rl/trainer/checkpoint-300
+  max_completion_length: 2048  # paper
+  temperature: 1.0
+  kl_beta: 0.0                 # no KL term on Countdown-Code (VARL paper)
+  lr: 3.0e-6                   # paper
+  lora_r: 128                  # paper
+  lora_alpha: 128
+  lora_dropout: 0.0
+  lora_target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  vllm_gpu_memory_utilization: 0.35
+  vllm_max_model_length: 3072
+  seed: 0
+
+evaluation:
+  k: 4
+  temperature: 0.7
+
+output:
+  dir: ${oc.env:SCRATCH}/icrl/countdown_code/${run_name}

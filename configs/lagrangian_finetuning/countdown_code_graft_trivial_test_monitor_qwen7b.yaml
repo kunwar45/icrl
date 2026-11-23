@@ -1,0 +1,67 @@
+# ABOUTME: GRAFT (Ward et al. 2026) on Countdown-Code with the paper's hand-written monitor (flags trivial test substitution only), LeetCode anchor steps, from the SFT-primed Qwen2.5-7B
+# ABOUTME: Run: CONFIG=configs/lagrangian_finetuning/countdown_code_graft_trivial_test_monitor_qwen7b.yaml via scripts/slurm/run_single_turn_icrl_pipeline_job.sh (stages base_eval,train,evaluate)
+benchmark: countdown_code
+run_name: countdown_code_graft_trivial_test_monitor_qwen7b_v1
+
+data:
+  dir: ${oc.env:SCRATCH}/icrl/countdown_code/data   # built by scripts/prepare_countdown_code_data.py
+  train_prompts: 4000          # RL problems, unseen in the demonstrations (Countdown-Code protocol)
+  test_prompts: 500
+  demonstrations: null         # all proxy-passing o4-mini traces (~1.2% of them hack; not filtered)
+
+policy:
+  model: ${oc.env:SCRATCH}/icrl/countdown_code/sft_primed_qwen2.5_7b
+  serve:
+    replicas: ["0", "1", "2", "3"]
+    tensor_parallel: 1
+    max_model_len: 4096
+    max_num_seqs: 128
+    gpu_fraction: 0.85
+    reasoning_parser: null
+    tool_call_parser: null
+
+sampling:
+  temperature: 0.7
+  max_tokens: 2048
+  workers: 64
+  timeout_s: 1800
+
+rl:
+  signal: gradient_routing     # the reward is the proxy reward, unchanged; the monitor only decides which adapter a reply updates
+  train_gpus: "0,1,2"          # the same three GPUs in every arm
+  num_generations: 8           # as the other arms (GRAFT paper: 16)
+  per_device_batch: 2
+  grad_accum: 20               # 3 GPUs x 2 x 20 = 120 replies = 15 prompts per step
+  steps_per_generation: 40     # one generation feeds 2 optimizer steps, as the other arms
+  max_steps: 1250              # as the other arms (GRAFT paper: 200 steps of 1,024 + 64 replies)
+  save_steps: 50
+  max_completion_length: 2048
+  temperature: 1.0
+  kl_beta: 0.0                 # no KL term (GRAFT paper, Appendix G.3)
+  lr: 1.67e-4                  # GRAFT paper, Appendix G.3; the other arms' 3e-6 is a LoRA learning rate
+  vllm_gpu_memory_utilization: 0.35
+  vllm_max_model_length: 3072
+  seed: 0
+
+graft:
+  adapter_width: 64            # neurons per layer in each of RETAIN and FORGET (paper, Qwen3-8B)
+  forget_amplification: 2.0    # FORGET's gradient on flagged replies (Algorithm 1 line 9)
+  routing: true                # false = the paper's "GRAFT w/o routing" ablation
+  monitor: trivial_test         # hand-written: flags a reply whose test.py passes a wrong answer; misses the other hacks (paper Section 4.1)
+  anchor:
+    fraction: 0.0588           # 1 in 17 prompts is an anchor prompt (paper: 64 anchor per 1,024 target replies); 0 = no anchor
+    data: ${oc.env:SCRATCH}/icrl/leetcode_anchor/data/anchor_train.jsonl   # built by scripts/prepare_leetcode_anchor_data.py
+    prompts: null
+  optimizer:                   # split-moment AdamW, paper Eq. 1 and Appendix G.3
+    beta2: 0.99
+    weight_decay: 0.1
+    max_grad_norm: 0.2
+    warmup_steps: 20
+    scheduler: cosine
+
+evaluation:
+  k: 4
+  temperature: 0.7
+
+output:
+  dir: ${oc.env:SCRATCH}/icrl/countdown_code/${run_name}

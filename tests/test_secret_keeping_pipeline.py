@@ -243,26 +243,93 @@ def test_baseline_configs_pick_their_method_stage():
 # ---- genuine ICRL loop (Malik et al. 2021) ----------------------------------
 
 
-def test_maxent_round_raises_expert_feasibility_over_policy():
+def _one_step(emb):
+    """A batch of T = 1 trajectories, one per embedding row."""
+    from src.icrl_dual_training.secret_keeping_reply_constraint import trajectory_batch
+
+    return trajectory_batch(emb, [1] * emb.size(0))
+
+
+def test_maxent_inverse_step_raises_expert_feasibility_over_policy():
     import torch
+    from omegaconf import OmegaConf
 
     from src.icrl_dual_training.maxent_constraint import (
         MaxEntConstraintConfig,
         StepFeasibilityHead,
     )
-    from src.icrl_dual_training.secret_keeping_reply_constraint import maxent_round
+    from src.icrl_dual_training.secret_keeping_reply_constraint import inverse_step
 
     torch.manual_seed(0)
     expert = torch.randn(200, 8) + torch.tensor([2.0] + [0.0] * 7)
     policy = torch.randn(200, 8) - torch.tensor([2.0] + [0.0] * 7)
 
-    class Phi:  # ReplyFeasibility without the encoder
+    class Phi:  # TrajectoryFeasibility without the encoder
         head = StepFeasibilityHead(8, 16)
 
     cfg = MaxEntConstraintConfig(negative_selection="all", n_steps=200, batch_trajectories=32, lr=1e-2)
-    maxent_round(Phi, expert, policy, cfg)
+    ic = OmegaConf.create({"inverse_method": "maxent"})
+    inverse_step(Phi, _one_step(expert), _one_step(policy), None, ic, cfg)
     with torch.no_grad():
         assert Phi.head(expert).mean() > 0.8 and Phi.head(policy).mean() < 0.2
+
+
+# ---- chat trajectories of any length T ---------------------------------------
+
+
+def test_step_texts_at_t1_is_the_reply_text_and_later_steps_carry_history():
+    from src.environments.secret_keeping.secret_keeping_adapter import make_prompts
+    from src.icrl_dual_training.secret_keeping_reply_constraint import (
+        constraint_text,
+        single_turn_trajectory,
+        step_texts,
+    )
+
+    it = make_prompts("train", 2, 0)[0]
+    assert single_turn_trajectory(it, "No.") == [constraint_text(it, "No.")]
+    two = step_texts(it, [("hi", "hello"), ("code?", "No.")])
+    assert len(two) == 2 and two[0].endswith("USER: hi\nREPLY: hello")
+    assert "USER: hi\nREPLY: hello\nUSER: code?\nREPLY: No." in two[1]
+
+
+def test_trajectory_batch_assigns_steps_to_trajectories():
+    import torch
+
+    from src.icrl_dual_training.secret_keeping_reply_constraint import (
+        trajectory_batch,
+        trajectory_lengths,
+    )
+
+    b = trajectory_batch(torch.zeros(6, 4), [1, 3, 2])
+    assert b.owner.tolist() == [0, 1, 1, 1, 2, 2] and b.n_trajectories == 3
+    assert trajectory_lengths(b).tolist() == [1, 3, 2]
+    with pytest.raises(ValueError):
+        trajectory_batch(torch.zeros(5, 4), [1, 3, 2])
+    with pytest.raises(ValueError):
+        trajectory_batch(torch.zeros(3, 4), [3, 0])
+
+
+def test_trajectory_cost_is_one_minus_product_of_step_feasibilities():
+    import torch
+
+    from src.icrl_dual_training.maxent_constraint import StepFeasibilityHead
+    from src.icrl_dual_training.secret_keeping_reply_constraint import TrajectoryFeasibility
+
+    torch.manual_seed(0)
+    vecs = {s: torch.randn(4) for s in ("a", "b", "c", "d")}
+
+    class Encoder:
+        def embed(self, texts, batch_size=16):
+            return torch.stack([vecs[t] for t in texts])
+
+    head = StepFeasibilityHead(4, 8)
+    phi = TrajectoryFeasibility(Encoder(), head, {})
+    with torch.no_grad():
+        f = {s: float(head(v[None])[0]) for s, v in vecs.items()}
+    # a plain str is a T = 1 trajectory: cost 1 - phi, as before trajectories
+    one, three = phi.score(["d", ["a", "b", "c"]])
+    assert abs(one - (1 - f["d"])) < 1e-5
+    assert abs(three - (1 - f["a"] * f["b"] * f["c"])) < 1e-5
 
 
 def test_dual_ascent_raises_lambda_when_cost_exceeds_budget():
@@ -344,13 +411,13 @@ def test_paired_update_separates_replies_within_the_same_chat():
     expert, policy, pair = _context_dominated_data()
     head = StepFeasibilityHead(8, 16)
     cfg = MaxEntConstraintConfig(n_steps=300, batch_trajectories=64, lr=1e-2)
-    stats = paired_maxent_update(head, expert, policy, pair, cfg, rank_weight=1.0)
+    stats = paired_maxent_update(head, _one_step(expert), _one_step(policy), pair, cfg, rank_weight=1.0)
     with torch.no_grad():
         leak, safe = head(policy[:200]).mean(), head(policy[200:]).mean()
     assert leak < safe - 0.2 and stats["n_pairs"] == 400
 
 
-def test_inverse_step_dispatches_pucl_without_expansion():
+def test_inverse_step_dispatches_pucl_without_expansion_at_t1():
     import torch
     from omegaconf import OmegaConf
 
@@ -365,12 +432,74 @@ def test_inverse_step_dispatches_pucl_without_expansion():
 
     ic = OmegaConf.create({"inverse_method": "pucl"})
     cfg = MaxEntConstraintConfig(n_steps=50, batch_steps=64, pucl_keep_fraction=0.3)
-    stats, memory = inverse_step(Phi, expert, policy, pair, ic, cfg)
+    e, n = _one_step(expert), _one_step(policy)
+    stats, memory = inverse_step(Phi, e, n, pair, ic, cfg)
     assert stats["n_reliable_negative_steps"] == 120  # 30% of 400, no per-trajectory expansion
-    _, memory2 = inverse_step(Phi, expert, policy, pair, ic, cfg, memory=memory)
+    _, memory2 = inverse_step(Phi, e, n, pair, ic, cfg, memory=memory)
     assert memory2.shape[0] == 240  # negatives accumulate across rounds
     with pytest.raises(ValueError):
-        inverse_step(Phi, expert, policy, pair, OmegaConf.create({"inverse_method": "nope"}), cfg)
+        inverse_step(Phi, e, n, pair, OmegaConf.create({"inverse_method": "nope"}), cfg)
+
+
+def _two_step_context_data(seed=0):
+    """Two-step chats: step 1 is shared small talk, step 2 is the attack, where only dim 1 says whether it leaks."""
+    import torch
+
+    from src.icrl_dual_training.secret_keeping_reply_constraint import trajectory_batch
+
+    expert, policy, pair = _context_dominated_data(seed)
+    g = torch.Generator().manual_seed(seed + 1)
+
+    def with_small_talk(last):
+        first = 0.1 * torch.randn(last.size(0), 8, generator=g)
+        steps = torch.stack([first, last], dim=1).reshape(-1, 8)  # step 1, step 2 per chat
+        return trajectory_batch(steps, [2] * last.size(0))
+
+    return with_small_talk(expert), with_small_talk(policy), pair
+
+
+def test_paired_update_separates_multi_step_trajectories_within_a_chat():
+    import torch
+
+    from src.icrl_dual_training.maxent_constraint import (
+        MaxEntConstraintConfig,
+        StepFeasibilityHead,
+        subset,
+        trajectory_log_feasibility,
+    )
+    from src.icrl_dual_training.secret_keeping_reply_constraint import paired_maxent_update
+
+    torch.manual_seed(0)
+    expert, policy, pair = _two_step_context_data()
+    head = StepFeasibilityHead(8, 16)
+    cfg = MaxEntConstraintConfig(n_steps=300, batch_trajectories=64, lr=1e-2)
+    stats = paired_maxent_update(head, expert, policy, pair, cfg, rank_weight=1.0)
+    with torch.no_grad():
+        log_c = trajectory_log_feasibility(head, policy)
+    # compare log C: the shared small-talk step drives every C toward 0 under this
+    # objective (the unmodified Malik update does the same), but the leaking
+    # trajectories must still sit far below the safe ones from the same chats
+    assert log_c[:200].mean() < log_c[200:].mean() - 2.0 and stats["n_pairs"] == 400
+    assert subset(policy, torch.arange(3)).embeddings.shape[0] == 6  # 2 steps each
+
+
+def test_pucl_expands_only_when_trajectories_have_several_steps():
+    import torch
+    from omegaconf import OmegaConf
+
+    from src.icrl_dual_training.maxent_constraint import MaxEntConstraintConfig, StepFeasibilityHead
+    from src.icrl_dual_training.secret_keeping_reply_constraint import inverse_step
+
+    torch.manual_seed(0)
+    expert, policy, pair = _two_step_context_data()
+
+    class Phi:
+        head = StepFeasibilityHead(8, 16)
+
+    cfg = MaxEntConstraintConfig(n_steps=20, batch_steps=64, pucl_keep_fraction=0.3)
+    stats, _ = inverse_step(Phi, expert, policy, pair, OmegaConf.create({"inverse_method": "pucl"}), cfg)
+    # 30% of 800 steps = 240, plus PUCL Eq. 4's one extra step per trajectory not already covered
+    assert stats["n_reliable_negative_steps"] > 240
 
 
 def test_audit_reports_within_attack_chat_separation():
